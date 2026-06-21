@@ -12,6 +12,8 @@ class Operacao {
 	public int $distritoAlvo;
 	public string $dataFim; // formato 'Y-m-d H:i:s'
 	public string $status;  // 'pendente' | 'concluido'
+	public ?string $resultado;            // mensagem formatada gerada ao concluir
+	public ?string $solicitanteDiscordId; // ID do jogador que abriu a operação
 
 	public function __construct(
 		string $tipo,
@@ -20,13 +22,17 @@ class Operacao {
 		int $horasDuracao,
 		?string $id = null,
 		?string $dataFim = null,
-		string $status = 'pendente'
+		string $status = 'pendente',
+		?string $resultado = null,
+		?string $solicitanteDiscordId = null
 	) {
 		$this->id = $id ?? uniqid('op_');
 		$this->tipo = $tipo;
 		$this->faccaoId = $faccaoId;
 		$this->distritoAlvo = $distritoAlvo;
 		$this->status = $status;
+		$this->resultado = $resultado;
+		$this->solicitanteDiscordId = $solicitanteDiscordId;
 
 		if ($dataFim !== null) {
 			$this->dataFim = $dataFim;
@@ -45,7 +51,9 @@ class Operacao {
 			horasDuracao: 0,
 			id: $linha['id'],
 			dataFim: $linha['data_fim'],
-			status: $linha['status']
+			status: $linha['status'],
+			resultado: $linha['resultado'] ?? null,
+			solicitanteDiscordId: $linha['solicitante_discord_id'] ?? null
 		);
 	}
 
