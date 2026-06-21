@@ -43,7 +43,7 @@ echo "Inserindo distritos...\n";
 
 $distritoRepo->salvar(new Distrito(
 	id: 1,
-	nome: 'Chiyoda (Sede da CCG)',
+	nome: 'Chiyoda',
 	bonusDominio: 'Ghouls perdem sigilo instantaneamente.',
 	faccaoDominanteId: 'ccg',
 	statusGuerra: 'pacificado'
@@ -51,7 +51,7 @@ $distritoRepo->salvar(new Distrito(
 
 $distritoRepo->salvar(new Distrito(
 	id: 4,
-	nome: 'Distrito 4 (Submundo)',
+	nome: 'Distrito 4',
 	bonusDominio: 'Libera acesso ao mercado negro.',
 	faccaoDominanteId: null,
 	statusGuerra: 'pacificado'
@@ -59,7 +59,7 @@ $distritoRepo->salvar(new Distrito(
 
 $distritoRepo->salvar(new Distrito(
 	id: 11,
-	nome: 'Distrito 11 (Zona de Guerra)',
+	nome: 'Distrito 11',
 	bonusDominio: '+20 de Poder Militar.',
 	faccaoDominanteId: 'aogiri',
 	nivelDominacao: 60,
@@ -68,7 +68,7 @@ $distritoRepo->salvar(new Distrito(
 
 $distritoRepo->salvar(new Distrito(
 	id: 13,
-	nome: 'Distrito 13 (Sangrento)',
+	nome: 'Distrito 13',
 	bonusDominio: 'Aumenta agressividade em 30%.',
 	faccaoDominanteId: 'aogiri',
 	statusGuerra: 'pacificado'
@@ -76,7 +76,7 @@ $distritoRepo->salvar(new Distrito(
 
 $distritoRepo->salvar(new Distrito(
 	id: 20,
-	nome: 'Distrito 20 (Pacífico)',
+	nome: 'Distrito 20',
 	bonusDominio: 'Apoio civil sobe passivamente.',
 	faccaoDominanteId: null,
 	statusGuerra: 'pacificado'
