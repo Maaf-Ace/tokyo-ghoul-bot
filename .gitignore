@@ -1,0 +1,5 @@
+.env
+vendor/
+certificate/ca.pem
+*.log
+.DS_Store
