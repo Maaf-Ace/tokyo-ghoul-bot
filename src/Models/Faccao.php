@@ -24,7 +24,9 @@ class Faccao {
 	public int $sigilo;
 
 	// Atributos dinâmicos
-	public int $nivelAlerta;
+	public int    $nivelAlerta;
+	public int    $posicaoAtual;        // distrito onde a facção está agora
+	public ?string $agentesFeridosAte;  // datetime até quando agentes ficam fora (null = recuperados)
 
 	public function __construct(
 		string $id,
@@ -37,7 +39,9 @@ class Faccao {
 		int $agressividade,
 		int $sigilo,
 		string $posturaCivis = 'indiferente',
-		int $nivelAlerta = 1
+		int $nivelAlerta = 1,
+		int $posicaoAtual = 0,
+		?string $agentesFeridosAte = null
 	) {
 		$this->id = $id;
 		$this->nome = $nome;
@@ -50,11 +54,10 @@ class Faccao {
 		$this->sigilo = $sigilo;
 		$this->posturaCivis = $posturaCivis;
 		$this->nivelAlerta = $nivelAlerta;
+		$this->posicaoAtual = $posicaoAtual ?: $distritoBase;
+		$this->agentesFeridosAte = $agentesFeridosAte;
 	}
 
-	/**
-	 * Cria uma instância a partir de uma linha do banco (array associativo do PDO).
-	 */
 	public static function fromArray(array $linha): self {
 		return new self(
 			id: $linha['id'],
@@ -67,8 +70,15 @@ class Faccao {
 			agressividade: (int) $linha['agressividade'],
 			sigilo: (int) $linha['sigilo'],
 			posturaCivis: $linha['postura_civis'] ?? 'indiferente',
-			nivelAlerta: (int) ($linha['nivel_alerta'] ?? 1)
+			nivelAlerta: (int) ($linha['nivel_alerta'] ?? 1),
+			posicaoAtual: (int) ($linha['posicao_atual'] ?? $linha['distrito_base']),
+			agentesFeridosAte: $linha['agentes_feridos_ate'] ?? null
 		);
+	}
+
+	public function agentesFeridados(): bool {
+		return $this->agentesFeridosAte !== null
+			&& new DateTime() < new DateTime($this->agentesFeridosAte);
 	}
 
 	/**

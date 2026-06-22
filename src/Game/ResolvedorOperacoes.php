@@ -47,7 +47,7 @@ class ResolvedorOperacoes {
 		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
 
 		if (!$distrito) {
-			return "📋 **[RELATÓRIO DE INTELIGÊNCIA]**\n{$solicitante} ❌ Distrito não encontrado.";
+			return "**[RELATÓRIO DE INTELIGÊNCIA]**\n{$solicitante} | Distrito não encontrado.";
 		}
 
 		$faccao = $distrito->faccaoDominanteId
@@ -56,11 +56,11 @@ class ResolvedorOperacoes {
 
 		$eventosAtivos = $this->eventoRepo->listarAtivosPorDistrito($distrito->id);
 
-		$iconeAlerta = match (true) {
-			$distrito->nivelAlerta >= 4 => '🔴',
-			$distrito->nivelAlerta >= 3 => '🟠',
-			$distrito->nivelAlerta >= 2 => '🟡',
-			default                     => '🟢',
+		$nivelAlertaTxt = match (true) {
+			$distrito->nivelAlerta >= 4 => '[CRITICO]',
+			$distrito->nivelAlerta >= 3 => '[ALTO]',
+			$distrito->nivelAlerta >= 2 => '[MEDIO]',
+			default                     => '[BAIXO]',
 		};
 
 		$controleMsg = $faccao
@@ -71,7 +71,7 @@ class ResolvedorOperacoes {
 		if (!empty($eventosAtivos)) {
 			$linhasEventos = "\n**Eventos Ativos:**\n";
 			foreach ($eventosAtivos as $e) {
-				$linhasEventos .= "> ⚡ {$e->titulo}\n";
+				$linhasEventos .= "> * {$e->titulo}\n";
 			}
 		}
 
@@ -80,19 +80,19 @@ class ResolvedorOperacoes {
 			$dicas = [
 				"Moradores relatam movimentação suspeita na região sul. Possível esconderijo.",
 				"Um informante anônimo menciona reuniões noturnas em um armazém abandonado.",
-				"Relatos de entregas irregulares foram feitas à redação da delegacia local.",
+				"Relatos de entregas irregulares foram feitas à delegacia local.",
 				"Crianças da área descreveram 'homens assustadores' num prédio específico.",
 			];
-			$dicaBonus = "\n> 💡 **Dica dos moradores:** " . $dicas[array_rand($dicas)];
+			$dicaBonus = "\n> **Dica dos moradores:** " . $dicas[array_rand($dicas)];
 		}
 
-		return "📋 **[RELATÓRIO DE INTELIGÊNCIA — CLASSIFICADO]**\n"
-		     . "{$solicitante} | 📍 **{$distrito->nome}**\n"
-		     . "───────────────────────────\n"
-		     . "{$iconeAlerta} Nível de Alerta: **{$distrito->nivelAlerta}/5**\n"
-		     . "🏙️ {$controleMsg}\n"
-		     . "👥 Apoio Civil: **{$distrito->apoioCivil}%**\n"
-		     . "⚔️ Status: *{$distrito->statusGuerra}*"
+		return "**[RELATÓRIO DE INTELIGÊNCIA — CLASSIFICADO]**\n"
+		     . "{$solicitante} | **{$distrito->nome}**\n"
+		     . "---------------------------\n"
+		     . "{$nivelAlertaTxt} Nível de Alerta: **{$distrito->nivelAlerta}/5**\n"
+		     . "{$controleMsg}\n"
+		     . "Apoio Civil: **{$distrito->apoioCivil}%**\n"
+		     . "Status: *{$distrito->statusGuerra}*"
 		     . $linhasEventos
 		     . $dicaBonus;
 	}
@@ -104,7 +104,7 @@ class ResolvedorOperacoes {
 		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
 
 		if (!$distrito) {
-			return "🛡️ **[RELATÓRIO DE PATRULHA]**\n{$solicitante} ❌ Distrito não encontrado.";
+			return "**[RELATÓRIO DE PATRULHA]**\n{$solicitante} | Distrito não encontrado.";
 		}
 
 		$apoioAntes   = $distrito->apoioCivil;
@@ -124,13 +124,13 @@ class ResolvedorOperacoes {
 			'"Vi os agentes conversando com as crianças. Passam confiança."',
 		];
 
-		return "🛡️ **[RELATÓRIO DE PATRULHA — CONCLUÍDO]**\n"
-		     . "{$solicitante} | 📍 **{$distrito->nome}**\n"
-		     . "───────────────────────────\n"
-		     . "✅ Patrulha pacífica concluída sem incidentes.\n"
-		     . "👥 Apoio Civil: **{$apoioAntes}%** → **{$distrito->apoioCivil}%** (+{$ganhoApoio})\n"
-		     . "📉 Nível de Alerta: **{$alertaAntes}/5** → **{$distrito->nivelAlerta}/5**\n"
-		     . "> 🗣️ Relato de morador: _" . $relatos[array_rand($relatos)] . "_";
+		return "**[RELATÓRIO DE PATRULHA — CONCLUÍDO]**\n"
+		     . "{$solicitante} | **{$distrito->nome}**\n"
+		     . "---------------------------\n"
+		     . "Patrulha pacífica concluída sem incidentes.\n"
+		     . "Apoio Civil: **{$apoioAntes}%** -> **{$distrito->apoioCivil}%** (+{$ganhoApoio})\n"
+		     . "Nível de Alerta: **{$alertaAntes}/5** -> **{$distrito->nivelAlerta}/5**\n"
+		     . "> Relato de morador: _" . $relatos[array_rand($relatos)] . "_";
 	}
 
 	// ── Pesquisa (Quinque) ─────────────────────────────────────────────────────
@@ -149,8 +149,8 @@ class ResolvedorOperacoes {
 		}
 
 		if (!$combateVitorioso) {
-			return "🔬 **[P&D — RESULTADO]**\n{$solicitante}\n"
-			     . "❌ O laboratório não possui espécimes disponíveis.\n"
+			return "**[P&D — RESULTADO]**\n{$solicitante}\n"
+			     . "O laboratório não possui espécimes disponíveis.\n"
 			     . "> A CCG precisa vencer ao menos um confronto para coletar kagune.";
 		}
 
@@ -179,12 +179,12 @@ class ResolvedorOperacoes {
 		$q->dataCriacao = date('Y-m-d H:i:s');
 		$this->quinqueRepo->criar($q);
 
-		return "🔬 **[P&D — QUINQUE CRIADO]**\n"
+		return "**[P&D — QUINQUE CRIADO]**\n"
 		     . "{$solicitante}\n"
-		     . "───────────────────────────\n"
-		     . "⚔️ Nome: **{$nome}**\n"
-		     . "🧬 Tipo RC: **" . strtoupper($tipoRc) . "** | Bônus de Combate: **+{$bonus}**\n"
-		     . "📖 _{$descricoes[$tipoRc]}_\n"
+		     . "---------------------------\n"
+		     . "Nome: **{$nome}**\n"
+		     . "Tipo RC: **" . strtoupper($tipoRc) . "** | Bônus de Combate: **+{$bonus}**\n"
+		     . "_{$descricoes[$tipoRc]}_\n"
 		     . "> Origem: material coletado de **{$combateVitorioso['defensor_id']}** após combate.";
 	}
 
@@ -195,7 +195,7 @@ class ResolvedorOperacoes {
 		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
 
 		if (!$distrito) {
-			return "📢 **[CAMPANHA DE MÍDIA]**\n{$solicitante} ❌ Distrito não encontrado.";
+			return "**[CAMPANHA DE MÍDIA]**\n{$solicitante} | Distrito não encontrado.";
 		}
 
 		$apoioAntes = $distrito->apoioCivil;
@@ -206,16 +206,16 @@ class ResolvedorOperacoes {
 
 		$bonusMsg = '';
 		if ($distrito->apoioCivil >= 60) {
-			$bonusMsg = "\n> 🗣️ **Bônus desbloqueado:** Moradores do {$distrito->nome} começaram a fornecer "
+			$bonusMsg = "\n> **Bônus desbloqueado:** Moradores do {$distrito->nome} começaram a fornecer "
 			          . "informações espontâneas. Investigações aqui recebem dicas extras.";
 		}
 
-		return "📢 **[CAMPANHA DE MÍDIA — CONCLUÍDA]**\n"
-		     . "{$solicitante} | 📍 **{$distrito->nome}**\n"
-		     . "───────────────────────────\n"
-		     . "✅ Campanha de relações públicas bem-sucedida.\n"
-		     . "👥 Apoio Civil: **{$apoioAntes}%** → **{$distrito->apoioCivil}%** (+{$ganho})\n"
-		     . "> 📰 A imagem da CCG melhorou significativamente na região."
+		return "**[CAMPANHA DE MÍDIA — CONCLUÍDA]**\n"
+		     . "{$solicitante} | **{$distrito->nome}**\n"
+		     . "---------------------------\n"
+		     . "Campanha de relações públicas bem-sucedida.\n"
+		     . "Apoio Civil: **{$apoioAntes}%** -> **{$distrito->apoioCivil}%** (+{$ganho})\n"
+		     . "> A imagem da CCG melhorou significativamente na região."
 		     . $bonusMsg;
 	}
 }

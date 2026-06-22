@@ -1,17 +1,19 @@
 <?php
 
 /**
- * tick.php — O "coração batendo" do submundo.
+ * tick.php — O "coracao batendo" do submundo.
  *
  * Cron sugerido (a cada 10 min):
  *   0,10,20,30,40,50 * * * * php /caminho/para/scripts/tick.php >> /logs/tick.log 2>&1
  *
- * A cada execução:
- *  1. Passa o tempo em facções Ghoul (fome, agressividade, sigilo).
- *  2. Cada facção executa uma Rotina de Sobrevivência (caça, contrabando ou recrutamento).
- *  3. Tenta iniciar conflitos entre facções.
- *  4. Processa operações ativas cujo prazo venceu (resolve e posta resultado).
- *  5. Publica manchetes relevantes no Clarim de Tóquio via webhook.
+ * A cada execucao:
+ *  1. Passa o tempo em faccoes Ghoul (fome, agressividade, sigilo).
+ *  2. Cada faccao executa uma Rotina de Sobrevivencia (caca, contrabando ou recrutamento).
+ *  3. Movimentos de IA das faccoes Ghoul.
+ *  4. Pressao de zona Aogiri (distritos adjacentes perdem apoio civil).
+ *  5. Tenta iniciar conflitos entre faccoes.
+ *  6. Processa operacoes CCG concluidas (resolve e posta resultado).
+ *  7. Publica manchetes no Clarim de Toquio via webhook.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -24,15 +26,16 @@ try {
 	$webhookOps      = Env::get('DISCORD_WEBHOOK_OPS', '');
 	$clarim          = new ClarimToquio($webhookNoticias, $webhookOps);
 	$distritoRepo    = new DistritoRepository();
+	$faccaoRepo      = new FaccaoRepository();
 
 	// 1. Motor de eventos: passagem de tempo + conflitos
 	$motor   = new MotorEventos();
 	$eventos = $motor->rodarTick();
 	echo "  -> " . count($eventos) . " evento(s) de mundo processado(s).\n";
 
-	// 2. Rotinas de sobrevivência das facções Ghoul
-	$rotinas       = new RotinasSobrevivencia();
-	$faccoesGhoul  = (new FaccaoRepository())->listarFaccoesGhoul();
+	// 2. Rotinas de sobrevivencia das faccoes Ghoul
+	$rotinas      = new RotinasSobrevivencia();
+	$faccoesGhoul = $faccaoRepo->listarFaccoesGhoul();
 
 	foreach ($faccoesGhoul as $faccao) {
 		$resultado = $rotinas->executarParaFaccao($faccao);
@@ -40,18 +43,38 @@ try {
 		echo "     [ROTINA/{$resultado['acao']}] {$resultado['descricao']}\n";
 	}
 
-	// 3. Publica eventos (combates + caçadas) no Clarim
+	// 3. Movimentos de IA das faccoes Ghoul
+	$sistemaMovimento  = new SistemaMovimento();
+	$movimentos        = $sistemaMovimento->executarMovimentoIA();
+
+	foreach ($movimentos as $mov) {
+		$dOrigem  = $distritoRepo->buscarPorId($mov['origem']);
+		$dDestino = $distritoRepo->buscarPorId($mov['destino']);
+		$nOrig    = $dOrigem  ? $dOrigem->nome  : "#{$mov['origem']}";
+		$nDest    = $dDestino ? $dDestino->nome : "#{$mov['destino']}";
+		echo "     [MOVIMENTO] {$mov['faccao']}: {$nOrig} -> {$nDest} ({$mov['motivo']})\n";
+	}
+
+	// 4. Pressao de zona Aogiri
+	$afetados = $sistemaMovimento->aplicarPressaoZona();
+	if (!empty($afetados)) {
+		foreach ($afetados as $a) {
+			echo "     [PRESSAO] {$a['nome']} perdeu {$a['reducao']} pts de apoio civil (zona Aogiri).\n";
+		}
+	}
+
+	// 5. Publica eventos (combates + cacadas) no Clarim
 	$clarim->publicarEventosTick($eventos, $distritoRepo);
 
-	// 4. Processa operações CCG concluídas
+	// 6. Processa operacoes CCG concluidas
 	$gerenciadorOps = new GerenciadorOperacoes();
 	$resolvedor     = new ResolvedorOperacoes();
 	$concluidas     = $gerenciadorOps->processarConclusoes();
 
-	echo "  -> " . count($concluidas) . " operação(ões) concluída(s).\n";
+	echo "  -> " . count($concluidas) . " operacao(oes) concluida(s).\n";
 
 	foreach ($concluidas as $op) {
-		echo "     [OPERAÇÃO] {$op->tipo} da facção {$op->faccaoId} no distrito {$op->distritoAlvo} concluída.\n";
+		echo "     [OPERACAO] {$op->tipo} no distrito {$op->distritoAlvo} concluida.\n";
 
 		$mensagemResultado = $resolvedor->resolver($op);
 		if ($mensagemResultado) {
@@ -59,7 +82,7 @@ try {
 		}
 	}
 
-	// 5. Log de combates para referência
+	// 7. Log de combates
 	foreach ($eventos as $ev) {
 		if ($ev['tipo'] === 'combate') {
 			echo "     [COMBATE] {$ev['atacante']} atacou {$ev['defensor']} -> {$ev['resultado_texto']} (vencedor: {$ev['vencedor']})\n";

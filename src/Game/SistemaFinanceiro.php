@@ -108,7 +108,7 @@ class SistemaFinanceiro {
 		$barras    = min(20, (int) ($orcamento / 500));
 		$barra     = str_repeat('█', $barras) . str_repeat('░', 20 - $barras);
 
-		return "💰 **Orçamento CCG — Esquadrão Zero**\n"
+		return "**Orçamento CCG — Esquadrão Zero**\n"
 		     . "```\n"
 		     . "Saldo Atual:      ¥" . number_format($orcamento, 0, ',', '.') . "\n"
 		     . "Renda Semanal:    ¥" . number_format($renda, 0, ',', '.') . "\n"

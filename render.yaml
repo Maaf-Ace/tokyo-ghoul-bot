@@ -1,0 +1,30 @@
+services:
+  # Bot 24/7 no plano FREE.
+  # Roda como Web Service (free) porque o Render free nao tem worker.
+  # O proprio bot.php sobe um mini-HTTP (keepalive) e roda os ticks internamente.
+  - type: web
+    name: tokyo-bot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      # Caminho do certificado SSL do Aiven (use Secret File do Render: /etc/secrets/ca.pem)
+      - key: DB_SSL_CA
+        value: /etc/secrets/ca.pem
+      - key: DISCORD_WEBHOOK_NOTICIAS
+        sync: false
+      - key: DISCORD_WEBHOOK_OPS
+        sync: false

@@ -26,6 +26,9 @@ require_once __DIR__ . '/src/Repositories/DiplomaciaRepository.php';
 require_once __DIR__ . '/src/Repositories/EventoMapaRepository.php';
 require_once __DIR__ . '/src/Repositories/QuinqueRepository.php';
 require_once __DIR__ . '/src/Repositories/FinancasCCGRepository.php';
+require_once __DIR__ . '/src/Repositories/AdjacenciaRepository.php';
+require_once __DIR__ . '/src/Repositories/AcoesSemanaRepository.php';
+require_once __DIR__ . '/src/Repositories/MovimentoRepository.php';
 
 // Game
 require_once __DIR__ . '/src/Game/MotorEventos.php';
@@ -35,3 +38,4 @@ require_once __DIR__ . '/src/Game/GerenciadorEventosMapa.php';
 require_once __DIR__ . '/src/Game/SistemaFinanceiro.php';
 require_once __DIR__ . '/src/Game/ClarimToquio.php';
 require_once __DIR__ . '/src/Game/ResolvedorOperacoes.php';
+require_once __DIR__ . '/src/Game/SistemaMovimento.php';

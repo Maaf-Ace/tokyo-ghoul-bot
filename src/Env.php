@@ -12,8 +12,11 @@ class Env {
 	public static function load(string $caminhoArquivo): void {
 		if (self::$carregado) return;
 
+		// No Render (e outros clouds) as variáveis já estão em $_ENV / getenv().
+		// Não lança exceção se o arquivo não existir — apenas ignora e usa o ambiente do sistema.
 		if (!file_exists($caminhoArquivo)) {
-			throw new RuntimeException("Arquivo .env não encontrado em: $caminhoArquivo. Copie o .env.example e preencha os valores.");
+			self::$carregado = true;
+			return;
 		}
 
 		$linhas = file($caminhoArquivo, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);

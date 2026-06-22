@@ -1,0 +1,7 @@
+.git
+.env
+vendor/
+certificate/
+*.log
+.DS_Store
+DOCUMENTACAO.md

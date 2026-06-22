@@ -18,10 +18,10 @@ class ClarimToquio {
 	];
 
 	private const MANCHETES_CACA = [
-		"⚠️ Moradores do **{distrito}** reportam atividade suspeita à noite. Recomenda-se cautela.",
-		"🌙 Alertas de segurança no **{distrito}**: desaparecimentos nos registros policiais aumentaram.",
-		"🔪 Incidentes bizarros no **{distrito}**: vestígios encontrados em becos. Autoridades investigam.",
-		"👁️ Testemunhas no **{distrito}** relatam figuras sinistras em áreas ermas.",
+		"Moradores do **{distrito}** reportam atividade suspeita à noite. Recomenda-se cautela.",
+		"Alertas de segurança no **{distrito}**: desaparecimentos nos registros policiais aumentaram.",
+		"Incidentes bizarros no **{distrito}**: vestígios encontrados em becos. Autoridades investigam.",
+		"Testemunhas no **{distrito}** relatam figuras sinistras em áreas ermas.",
 	];
 
 	public function __construct(string $webhookNoticias = '', string $webhookOps = '') {
@@ -43,24 +43,16 @@ class ClarimToquio {
 
 		if (empty($manchetes)) return;
 
-		$corpo = "📰 **[CLARIM DE TÓQUIO]**\n\n" . implode("\n\n", $manchetes);
+		$corpo = "**[CLARIM DE TÓQUIO]**\n\n" . implode("\n\n", $manchetes);
 		$this->postar($this->webhookNoticias, $corpo);
 	}
 
 	/** Publica um evento de mapa (blecaute, protestos, etc.) no canal de notícias. */
 	public function publicarEventoMapa(EventoMapa $evento, Distrito $distrito): void {
-		$emojis = [
-			'blecaute'        => '🌑',
-			'protestos'       => '📢',
-			'surto_ghoul'     => '🐺',
-			'reforcopolicial' => '🚓',
-			'mercado_negro'   => '🏴',
-		];
-		$emoji = $emojis[$evento->tipo] ?? '📰';
 		$expira = date('d/m H:i', strtotime($evento->dataFim));
 
-		$mensagem = "📰 **[CLARIM DE TÓQUIO]** | {$emoji} **{$evento->titulo}**\n"
-		          . "📍 Área afetada: **{$distrito->nome}**\n"
+		$mensagem = "**[CLARIM DE TÓQUIO]** | **{$evento->titulo}**\n"
+		          . "Área afetada: **{$distrito->nome}**\n"
 		          . "> _{$evento->descricao}_\n"
 		          . "_Duração estimada até {$expira}._";
 
@@ -79,8 +71,8 @@ class ClarimToquio {
 
 	private function formatarCombate(array $ev): string {
 		$manchete = self::MANCHETES_COMBATE[array_rand(self::MANCHETES_COMBATE)];
-		return "🔴 {$manchete}\n"
-		     . "🏴 As forças de **{$ev['vencedor']}** saíram vitoriosas do confronto.";
+		return "{$manchete}\n"
+		     . "As forças de **{$ev['vencedor']}** saíram vitoriosas do confronto.";
 	}
 
 	private function formatarCacada(array $ev, DistritoRepository $distritoRepo): string {
