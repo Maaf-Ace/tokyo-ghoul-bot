@@ -179,7 +179,30 @@ $discord->on('init', function (Discord $discord) {
                            . $evStr;
             }
 
-            $message->reply(implode("\n\n", $linhas));
+            // Envia em partes para não ultrapassar o limite de 2000 caracteres do Discord
+            $parte   = '';
+            $primeiro = true;
+            foreach ($linhas as $linha) {
+                $candidato = $parte . ($parte ? "\n\n" : '') . $linha;
+                if (strlen($candidato) > 1900) {
+                    if ($primeiro) {
+                        $message->reply($parte);
+                        $primeiro = false;
+                    } else {
+                        $message->channel->sendMessage($parte);
+                    }
+                    $parte = $linha;
+                } else {
+                    $parte = $candidato;
+                }
+            }
+            if ($parte !== '') {
+                if ($primeiro) {
+                    $message->reply($parte);
+                } else {
+                    $message->channel->sendMessage($parte);
+                }
+            }
             return;
         }
 
