@@ -69,19 +69,23 @@ class HistoricoCombateRepository {
 		string $defensorId,
 		string $taticaAtacante,
 		string $taticaDefensor,
-		string $vencedorId
+		string $vencedorId,
+		bool   $derrotaSinistra = false,
+		bool   $escolhaManual   = false
 	): void {
 		$sql = "INSERT INTO historico_combates
-			(atacante_id, defensor_id, tatica_atacante, tatica_defensor, vencedor_id)
-			VALUES (:atacante_id, :defensor_id, :tatica_atacante, :tatica_defensor, :vencedor_id)";
+			(atacante_id, defensor_id, tatica_atacante, tatica_defensor, vencedor_id, derrota_sinistra, escolha_manual)
+			VALUES (:atacante_id, :defensor_id, :tatica_atacante, :tatica_defensor, :vencedor_id, :derrota_sinistra, :escolha_manual)";
 
 		$stmt = $this->db->prepare($sql);
 		$stmt->execute([
-			'atacante_id' => $atacanteId,
-			'defensor_id' => $defensorId,
-			'tatica_atacante' => $taticaAtacante,
-			'tatica_defensor' => $taticaDefensor,
-			'vencedor_id' => $vencedorId,
+			'atacante_id'      => $atacanteId,
+			'defensor_id'      => $defensorId,
+			'tatica_atacante'  => $taticaAtacante,
+			'tatica_defensor'  => $taticaDefensor,
+			'vencedor_id'      => $vencedorId,
+			'derrota_sinistra' => (int) $derrotaSinistra,
+			'escolha_manual'   => (int) $escolhaManual,
 		]);
 	}
 

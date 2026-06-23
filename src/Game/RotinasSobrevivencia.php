@@ -1,10 +1,5 @@
 <?php
 
-/**
- * Gerencia as ações autônomas das facções Ghoul a cada tick:
- * Caçar (mata fome / aumenta alerta), Contrabandar (ganha suprimentos / perde sigilo)
- * ou Recrutar (ganha poder / perde sigilo e ganha fome).
- */
 class RotinasSobrevivencia {
 
 	private DistritoRepository $distritoRepo;
@@ -18,26 +13,23 @@ class RotinasSobrevivencia {
 		$this->faccaoRepo   = $faccaoRepo   ?? new FaccaoRepository();
 	}
 
-	/** Escolhe e executa uma ação de sobrevivência para a facção. Persiste as mudanças. */
 	public function executarParaFaccao(Faccao $faccao): array {
 		$acao = $this->escolherAcao($faccao);
-
 		return match ($acao) {
 			'caca'         => $this->cacar($faccao),
 			'contrabando'  => $this->contrabandear($faccao),
 			'recrutamento' => $this->recrutar($faccao),
 			default        => [
-				'tipo'    => 'sobrevivencia',
-				'acao'    => 'inativa',
-				'faccao'  => $faccao->nome,
-				'faccao_id' => $faccao->id,
+				'tipo'        => 'sobrevivencia',
+				'acao'        => 'inativa',
+				'faccao'      => $faccao->nome,
+				'faccao_id'   => $faccao->id,
 				'distrito_id' => null,
-				'descricao' => "{$faccao->nome} permaneceu inativa neste ciclo.",
+				'descricao'   => "{$faccao->nome} permaneceu inativa neste ciclo.",
 			],
 		};
 	}
 
-	/** Peso de cada ação baseado nos atributos atuais da facção. */
 	private function escolherAcao(Faccao $faccao): string {
 		$pesos = [
 			'caca'         => max(1, $faccao->fome),
@@ -58,13 +50,15 @@ class RotinasSobrevivencia {
 		$reducaoFome   = rand(10, 25);
 		$aumentoAlerta = rand(1, 3);
 
-		$faccao->fome         = max(0, $faccao->fome - $reducaoFome);
+		$faccao->fome          = max(0, $faccao->fome - $reducaoFome);
 		$faccao->agressividade = min(100, $faccao->agressividade + 2);
 		$this->faccaoRepo->atualizar($faccao);
 
-		$distrito = $this->distritoRepo->buscarPorId($faccao->distritoBase);
+		// Caçada reduz segurança e alerta o distrito onde a facção está
+		$distrito = $this->distritoRepo->buscarPorId($faccao->posicaoAtual);
 		if ($distrito) {
-			$distrito->apoioCivil  = max(0, $distrito->apoioCivil - rand(3, 8));
+			$distrito->seguranca   = max(0, $distrito->seguranca - rand(6, 10));
+			$distrito->economia    = max(0, $distrito->economia - 5);
 			$distrito->nivelAlerta = min(5, $distrito->nivelAlerta + $aumentoAlerta);
 			$this->distritoRepo->atualizar($distrito);
 		}
@@ -74,8 +68,8 @@ class RotinasSobrevivencia {
 			'acao'        => 'caca',
 			'faccao'      => $faccao->nome,
 			'faccao_id'   => $faccao->id,
-			'distrito_id' => $faccao->distritoBase,
-			'descricao'   => "{$faccao->nome} saiu para caçar. Fome -{$reducaoFome}. Alerta no distrito +{$aumentoAlerta}.",
+			'distrito_id' => $faccao->posicaoAtual,
+			'descricao'   => "{$faccao->nome} cacou no distrito #{$faccao->posicaoAtual}. Fome -{$reducaoFome}. Seguranca -8. Alerta +{$aumentoAlerta}.",
 		];
 	}
 
@@ -87,13 +81,20 @@ class RotinasSobrevivencia {
 		$faccao->sigilo      = max(0, $faccao->sigilo - $perdaSigilo);
 		$this->faccaoRepo->atualizar($faccao);
 
+		// Contrabando prejudica economia do distrito
+		$distrito = $this->distritoRepo->buscarPorId($faccao->posicaoAtual);
+		if ($distrito) {
+			$distrito->economia = max(0, $distrito->economia - 10);
+			$this->distritoRepo->atualizar($distrito);
+		}
+
 		return [
 			'tipo'        => 'sobrevivencia',
 			'acao'        => 'contrabando',
 			'faccao'      => $faccao->nome,
 			'faccao_id'   => $faccao->id,
-			'distrito_id' => null,
-			'descricao'   => "{$faccao->nome} fez contrabando. Suprimentos +{$ganhoSuprimentos}, Sigilo -{$perdaSigilo}.",
+			'distrito_id' => $faccao->posicaoAtual,
+			'descricao'   => "{$faccao->nome} fez contrabando. Suprimentos +{$ganhoSuprimentos}, Sigilo -{$perdaSigilo}, Economia local -10.",
 		];
 	}
 

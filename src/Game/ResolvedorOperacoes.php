@@ -6,24 +6,30 @@
  */
 class ResolvedorOperacoes {
 
-	private DistritoRepository        $distritoRepo;
-	private FaccaoRepository          $faccaoRepo;
-	private EventoMapaRepository      $eventoRepo;
-	private QuinqueRepository         $quinqueRepo;
+	private DistritoRepository         $distritoRepo;
+	private FaccaoRepository           $faccaoRepo;
+	private EventoMapaRepository       $eventoRepo;
+	private QuinqueRepository          $quinqueRepo;
 	private HistoricoCombateRepository $historicoRepo;
+	private ConhecimentoCCGRepository  $conhecimentoRepo;
+	private QuestDistritoRepository    $questRepo;
 
 	public function __construct(
-		?DistritoRepository        $distritoRepo  = null,
-		?FaccaoRepository          $faccaoRepo    = null,
-		?EventoMapaRepository      $eventoRepo    = null,
-		?QuinqueRepository         $quinqueRepo   = null,
-		?HistoricoCombateRepository $historicoRepo = null
+		?DistritoRepository         $distritoRepo     = null,
+		?FaccaoRepository           $faccaoRepo       = null,
+		?EventoMapaRepository       $eventoRepo       = null,
+		?QuinqueRepository          $quinqueRepo      = null,
+		?HistoricoCombateRepository $historicoRepo    = null,
+		?ConhecimentoCCGRepository  $conhecimentoRepo = null,
+		?QuestDistritoRepository    $questRepo        = null
 	) {
-		$this->distritoRepo  = $distritoRepo  ?? new DistritoRepository();
-		$this->faccaoRepo    = $faccaoRepo    ?? new FaccaoRepository();
-		$this->eventoRepo    = $eventoRepo    ?? new EventoMapaRepository();
-		$this->quinqueRepo   = $quinqueRepo   ?? new QuinqueRepository();
-		$this->historicoRepo = $historicoRepo ?? new HistoricoCombateRepository();
+		$this->distritoRepo     = $distritoRepo     ?? new DistritoRepository();
+		$this->faccaoRepo       = $faccaoRepo       ?? new FaccaoRepository();
+		$this->eventoRepo       = $eventoRepo       ?? new EventoMapaRepository();
+		$this->quinqueRepo      = $quinqueRepo      ?? new QuinqueRepository();
+		$this->historicoRepo    = $historicoRepo    ?? new HistoricoCombateRepository();
+		$this->conhecimentoRepo = $conhecimentoRepo ?? new ConhecimentoCCGRepository();
+		$this->questRepo        = $questRepo        ?? new QuestDistritoRepository();
 	}
 
 	/**
@@ -36,6 +42,7 @@ class ResolvedorOperacoes {
 			'patrulha'     => $this->resolverPatrulha($op),
 			'pesquisa'     => $this->resolverPesquisa($op),
 			'campanha'     => $this->resolverCampanha($op),
+			'abastecer'    => $this->resolverAbastecer($op),
 			default        => null,
 		};
 	}
@@ -67,6 +74,28 @@ class ResolvedorOperacoes {
 			? "Controlado por **{$faccao->nome}** (Dominação: {$distrito->nivelDominacao}%)"
 			: '**Território Neutro**';
 
+		// Determina nível de conhecimento com base na satisfação geral do distrito
+		$nivel = 'basico';
+		if ($distrito->satisfacaoGeral >= 70) {
+			$nivel = 'critico';
+		} elseif ($distrito->satisfacaoGeral >= 50) {
+			$nivel = 'bom';
+		}
+
+		// Persiste conhecimento (nunca rebaixa de nível)
+		$dadosConhecimento = ['dominacao_conhecida' => $distrito->nivelDominacao];
+		if ($faccao) {
+			$dadosConhecimento['faccao_conhecida']  = $faccao->id;
+			$dadosConhecimento['tatica_conhecida']  = $faccao->taticaFavorita;
+			$dadosConhecimento['poder_aproximado']  = (int) (round($faccao->poderMilitar / 10) * 10);
+		}
+		$this->conhecimentoRepo->atualizarConhecimento($distrito->id, $nivel, $dadosConhecimento);
+
+		// Revela quests em investigações bom/critico
+		if (in_array($nivel, ['bom', 'critico'])) {
+			$this->questRepo->revelarTodasDoDistrito($distrito->id);
+		}
+
 		$linhasEventos = '';
 		if (!empty($eventosAtivos)) {
 			$linhasEventos = "\n**Eventos Ativos:**\n";
@@ -76,7 +105,7 @@ class ResolvedorOperacoes {
 		}
 
 		$dicaBonus = '';
-		if ($distrito->apoioCivil >= 50) {
+		if ($distrito->satisfacaoGeral >= 50) {
 			$dicas = [
 				"Moradores relatam movimentação suspeita na região sul. Possível esconderijo.",
 				"Um informante anônimo menciona reuniões noturnas em um armazém abandonado.",
@@ -86,15 +115,28 @@ class ResolvedorOperacoes {
 			$dicaBonus = "\n> **Dica dos moradores:** " . $dicas[array_rand($dicas)];
 		}
 
+		$questInfo = '';
+		$quests = $this->questRepo->listarReveladas($distrito->id);
+		if (!empty($quests)) {
+			$questInfo = "\n**Objetivos Revelados:**";
+			foreach ($quests as $q) {
+				$status = $q['status'] === 'concluida' ? '[OK]' : '[ ]';
+				$questInfo .= "\n> {$status} [{$q['tipo']}] {$q['titulo']}";
+			}
+		}
+
 		return "**[RELATÓRIO DE INTELIGÊNCIA — CLASSIFICADO]**\n"
 		     . "{$solicitante} | **{$distrito->nome}**\n"
 		     . "---------------------------\n"
 		     . "{$nivelAlertaTxt} Nível de Alerta: **{$distrito->nivelAlerta}/5**\n"
 		     . "{$controleMsg}\n"
-		     . "Apoio Civil: **{$distrito->apoioCivil}%**\n"
+		     . "Satisfação Geral: **{$distrito->satisfacaoGeral}%** "
+		     . "(Seg: {$distrito->seguranca} | Eco: {$distrito->economia} | Sup: {$distrito->suprimentosPop})\n"
+		     . "Conhecimento: **" . strtoupper($nivel) . "**\n"
 		     . "Status: *{$distrito->statusGuerra}*"
 		     . $linhasEventos
-		     . $dicaBonus;
+		     . $dicaBonus
+		     . $questInfo;
 	}
 
 	// ── Patrulha ──────────────────────────────────────────────────────────────
@@ -107,12 +149,12 @@ class ResolvedorOperacoes {
 			return "**[RELATÓRIO DE PATRULHA]**\n{$solicitante} | Distrito não encontrado.";
 		}
 
-		$apoioAntes   = $distrito->apoioCivil;
-		$alertaAntes  = $distrito->nivelAlerta;
-		$ganhoApoio   = rand(15, 25);
+		$segAntes      = $distrito->seguranca;
+		$alertaAntes   = $distrito->nivelAlerta;
+		$ganhoSeg      = rand(15, 25);
 		$reducaoAlerta = $distrito->nivelAlerta >= 2 ? 1 : 0;
 
-		$distrito->apoioCivil  = min(100, $distrito->apoioCivil + $ganhoApoio);
+		$distrito->seguranca   = min(100, $distrito->seguranca + $ganhoSeg);
 		$distrito->nivelAlerta = max(1, $distrito->nivelAlerta - $reducaoAlerta);
 		$this->distritoRepo->atualizar($distrito);
 
@@ -124,11 +166,11 @@ class ResolvedorOperacoes {
 			'"Vi os agentes conversando com as crianças. Passam confiança."',
 		];
 
-		return "**[RELATÓRIO DE PATRULHA — CONCLUÍDO]**\n"
+		return "**[TOKYO-GO | PATRULHA CONCLUÍDA]**\n"
 		     . "{$solicitante} | **{$distrito->nome}**\n"
 		     . "---------------------------\n"
 		     . "Patrulha pacífica concluída sem incidentes.\n"
-		     . "Apoio Civil: **{$apoioAntes}%** -> **{$distrito->apoioCivil}%** (+{$ganhoApoio})\n"
+		     . "Segurança: **{$segAntes}** -> **{$distrito->seguranca}** (+{$ganhoSeg})\n"
 		     . "Nível de Alerta: **{$alertaAntes}/5** -> **{$distrito->nivelAlerta}/5**\n"
 		     . "> Relato de morador: _" . $relatos[array_rand($relatos)] . "_";
 	}
@@ -138,8 +180,8 @@ class ResolvedorOperacoes {
 	private function resolverPesquisa(Operacao $op): string {
 		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
 
-		$ultimosCombates    = $this->historicoRepo->buscarHistoricoDaFaccao('ccg', 10);
-		$combateVitorioso   = null;
+		$ultimosCombates  = $this->historicoRepo->buscarHistoricoDaFaccao('ccg', 10);
+		$combateVitorioso = null;
 
 		foreach ($ultimosCombates as $c) {
 			if ($c['vencedor_id'] === 'ccg') {
@@ -168,15 +210,15 @@ class ResolvedorOperacoes {
 			'koukaku' => 'Tipo Koukaku. Armadura de alta resistência. Essencial para proteção em linha de frente.',
 		];
 
-		$q              = new Quinque();
-		$q->id          = uniqid('qnq_');
-		$q->nome        = $nome;
-		$q->tipoRc      = $tipoRc;
+		$q               = new Quinque();
+		$q->id           = uniqid('qnq_');
+		$q->nome         = $nome;
+		$q->tipoRc       = $tipoRc;
 		$q->bonusCombate = $bonus;
-		$q->descricao   = $descricoes[$tipoRc];
-		$q->ghoulOrigem = $combateVitorioso['defensor_id'];
-		$q->faccaoId    = 'ccg';
-		$q->dataCriacao = date('Y-m-d H:i:s');
+		$q->descricao    = $descricoes[$tipoRc];
+		$q->ghoulOrigem  = $combateVitorioso['defensor_id'];
+		$q->faccaoId     = 'ccg';
+		$q->dataCriacao  = date('Y-m-d H:i:s');
 		$this->quinqueRepo->criar($q);
 
 		return "**[P&D — QUINQUE CRIADO]**\n"
@@ -195,27 +237,59 @@ class ResolvedorOperacoes {
 		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
 
 		if (!$distrito) {
-			return "**[CAMPANHA DE MÍDIA]**\n{$solicitante} | Distrito não encontrado.";
+			return "**[TOKYO-GO | CAMPANHA DE MÍDIA]**\n{$solicitante} | Distrito não encontrado.";
 		}
 
-		$apoioAntes = $distrito->apoioCivil;
-		$ganho      = rand(20, 35);
+		$ecoAntes = $distrito->economia;
+		$ganho    = rand(20, 35);
 
-		$distrito->apoioCivil = min(100, $distrito->apoioCivil + $ganho);
+		$distrito->economia = min(100, $distrito->economia + $ganho);
 		$this->distritoRepo->atualizar($distrito);
 
 		$bonusMsg = '';
-		if ($distrito->apoioCivil >= 60) {
+		if ($distrito->economia >= 60) {
 			$bonusMsg = "\n> **Bônus desbloqueado:** Moradores do {$distrito->nome} começaram a fornecer "
 			          . "informações espontâneas. Investigações aqui recebem dicas extras.";
 		}
 
-		return "**[CAMPANHA DE MÍDIA — CONCLUÍDA]**\n"
+		return "**[TOKYO-GO | CAMPANHA DE MÍDIA CONCLUÍDA]**\n"
 		     . "{$solicitante} | **{$distrito->nome}**\n"
 		     . "---------------------------\n"
 		     . "Campanha de relações públicas bem-sucedida.\n"
-		     . "Apoio Civil: **{$apoioAntes}%** -> **{$distrito->apoioCivil}%** (+{$ganho})\n"
+		     . "Economia: **{$ecoAntes}** -> **{$distrito->economia}** (+{$ganho})\n"
 		     . "> A imagem da CCG melhorou significativamente na região."
 		     . $bonusMsg;
+	}
+
+	// ── Abastecimento Civil ───────────────────────────────────────────────────
+
+	private function resolverAbastecer(Operacao $op): string {
+		$distrito    = $this->distritoRepo->buscarPorId($op->distritoAlvo);
+		$solicitante = $op->solicitanteDiscordId ? "<@{$op->solicitanteDiscordId}>" : 'Agente';
+
+		if (!$distrito) {
+			return "**[TOKYO-GO | ABASTECIMENTO]**\n{$solicitante} | Distrito não encontrado.";
+		}
+
+		$supAntes = $distrito->suprimentosPop;
+		$ganho    = rand(20, 30);
+
+		$distrito->suprimentosPop = min(100, $distrito->suprimentosPop + $ganho);
+		$this->distritoRepo->atualizar($distrito);
+
+		// CCG consome suprimentos próprios para abastecer a população
+		$ccg = $this->faccaoRepo->buscarPorId('ccg');
+		if ($ccg) {
+			$ccg->suprimentos = max(0, $ccg->suprimentos - 15);
+			$this->faccaoRepo->atualizar($ccg);
+		}
+
+		return "**[TOKYO-GO | ABASTECIMENTO CONCLUÍDO]**\n"
+		     . "{$solicitante} | **{$distrito->nome}**\n"
+		     . "---------------------------\n"
+		     . "Comboio distribuiu recursos para a população local.\n"
+		     . "Suprimentos Pop.: **{$supAntes}** -> **{$distrito->suprimentosPop}** (+{$ganho})\n"
+		     . "CCG Suprimentos: -15 (consumidos no abastecimento)\n"
+		     . "> A população agradece o apoio do Esquadrão Zero.";
 	}
 }

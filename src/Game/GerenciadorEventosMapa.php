@@ -86,6 +86,15 @@ class GerenciadorEventosMapa {
 				$dataFim
 			);
 
+			// Efeito imediato: blecaute reduz economia do distrito afetado
+			if ($modelo['tipo'] === 'blecaute') {
+				$d = $this->distritoRepo->buscarPorId($distrito->id);
+				if ($d) {
+					$d->economia = max(0, $d->economia - 20);
+					$this->distritoRepo->atualizar($d);
+				}
+			}
+
 			$criados[] = [
 				'tipo'          => $modelo['tipo'],
 				'titulo'        => $modelo['titulo'],

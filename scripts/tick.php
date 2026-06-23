@@ -1,5 +1,7 @@
 <?php
 
+date_default_timezone_set('America/Sao_Paulo');
+
 /**
  * tick.php — O "coracao batendo" do submundo.
  *
@@ -7,13 +9,15 @@
  *   0,10,20,30,40,50 * * * * php /caminho/para/scripts/tick.php >> /logs/tick.log 2>&1
  *
  * A cada execucao:
- *  1. Passa o tempo em faccoes Ghoul (fome, agressividade, sigilo).
- *  2. Cada faccao executa uma Rotina de Sobrevivencia (caca, contrabando ou recrutamento).
- *  3. Movimentos de IA das faccoes Ghoul.
- *  4. Pressao de zona Aogiri (distritos adjacentes perdem apoio civil).
- *  5. Tenta iniciar conflitos entre faccoes.
- *  6. Processa operacoes CCG concluidas (resolve e posta resultado).
- *  7. Publica manchetes no Clarim de Toquio via webhook.
+ *  1. Resolve confrontos_pendentes expirados (sem resposta do jogador).
+ *  2. Passa o tempo em faccoes Ghoul (fome, agressividade, sigilo).
+ *  3. Cada faccao executa uma Rotina de Sobrevivencia.
+ *  4. Movimentos de IA das faccoes Ghoul.
+ *  5. Pressao de zona (faccoes predadoras reduzem seguranca de vizinhos).
+ *  6. Verifica revolta em distritos (satisfacaoGeral >= 100 ou < 20).
+ *  7. Tenta iniciar conflitos entre faccoes.
+ *  8. Processa operacoes CCG concluidas.
+ *  9. Publica manchetes no Tokyo-GO via webhook.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -24,16 +28,29 @@ echo "[" . date('Y-m-d H:i:s') . "] Iniciando tick...\n";
 try {
 	$webhookNoticias = Env::get('DISCORD_WEBHOOK_NOTICIAS', '');
 	$webhookOps      = Env::get('DISCORD_WEBHOOK_OPS', '');
-	$clarim          = new ClarimToquio($webhookNoticias, $webhookOps);
-	$distritoRepo    = new DistritoRepository();
-	$faccaoRepo      = new FaccaoRepository();
+	$botToken        = Env::get('DISCORD_TOKEN', '');
+	$opsChannelId    = Env::get('DISCORD_OPS_CHANNEL_ID', '');
 
-	// 1. Motor de eventos: passagem de tempo + conflitos
-	$motor   = new MotorEventos();
+	$clarim       = new ClarimToquio($webhookNoticias, $webhookOps, $botToken, $opsChannelId);
+	$cpRepo       = new ConfruntoPendenteRepository();
+	$distritoRepo = new DistritoRepository();
+	$faccaoRepo   = new FaccaoRepository();
+
+	// 1. Resolve confrontos expirados (sem escolha do jogador)
+	$motor     = new MotorEventos(null, null, null, null, $clarim, $cpRepo);
+	$expirados = $motor->resolverConfrontosExpirados();
+	if (!empty($expirados)) {
+		foreach ($expirados as $ev) {
+			echo "  [CONFRONTO EXPIRADO] {$ev['atacante']} vs {$ev['defensor']} -> {$ev['vencedor']}\n";
+		}
+		$clarim->publicarEventosTick($expirados, $distritoRepo);
+	}
+
+	// 2. Motor de eventos: passagem de tempo + conflitos (com pendentes integrados)
 	$eventos = $motor->rodarTick();
 	echo "  -> " . count($eventos) . " evento(s) de mundo processado(s).\n";
 
-	// 2. Rotinas de sobrevivencia das faccoes Ghoul
+	// 3. Rotinas de sobrevivencia das faccoes Ghoul
 	$rotinas      = new RotinasSobrevivencia();
 	$faccoesGhoul = $faccaoRepo->listarFaccoesGhoul();
 
@@ -43,9 +60,9 @@ try {
 		echo "     [ROTINA/{$resultado['acao']}] {$resultado['descricao']}\n";
 	}
 
-	// 3. Movimentos de IA das faccoes Ghoul
-	$sistemaMovimento  = new SistemaMovimento();
-	$movimentos        = $sistemaMovimento->executarMovimentoIA();
+	// 4. Movimentos de IA das faccoes Ghoul
+	$sistemaMovimento = new SistemaMovimento();
+	$movimentos       = $sistemaMovimento->executarMovimentoIA();
 
 	foreach ($movimentos as $mov) {
 		$dOrigem  = $distritoRepo->buscarPorId($mov['origem']);
@@ -55,18 +72,33 @@ try {
 		echo "     [MOVIMENTO] {$mov['faccao']}: {$nOrig} -> {$nDest} ({$mov['motivo']})\n";
 	}
 
-	// 4. Pressao de zona Aogiri
+	// 5. Pressao de zona (faccoes predadoras)
 	$afetados = $sistemaMovimento->aplicarPressaoZona();
 	if (!empty($afetados)) {
 		foreach ($afetados as $a) {
-			echo "     [PRESSAO] {$a['nome']} perdeu {$a['reducao']} pts de apoio civil (zona Aogiri).\n";
+			echo "     [PRESSAO] {$a['nome']} perdeu {$a['reducao']} pts de seguranca (zona predadora).\n";
 		}
 	}
 
-	// 5. Publica eventos (combates + cacadas) no Clarim
+	// 6. Verifica revolta em distritos dominados
+	$distritos = $distritoRepo->listarTodos();
+	foreach ($distritos as $d) {
+		if (!$d->faccaoDominanteId) continue;
+
+		if ($d->satisfacaoGeral >= 100 || $d->satisfacaoGeral < 20) {
+			$distritoRepo->expulsarDominador($d->id);
+			$questRepo = new QuestDistritoRepository();
+			$questRepo->resetarParaDistrito($d->id);
+			$questRepo->seedParaDistrito($d->id);
+			echo "     [REVOLTA] {$d->nome} (#{$d->id}) expulsou {$d->faccaoDominanteId} "
+			   . "(satisfacao: {$d->satisfacaoGeral}%)\n";
+		}
+	}
+
+	// 7. Publica eventos (combates + cacadas) no Tokyo-GO
 	$clarim->publicarEventosTick($eventos, $distritoRepo);
 
-	// 6. Processa operacoes CCG concluidas
+	// 8. Processa operacoes CCG concluidas
 	$gerenciadorOps = new GerenciadorOperacoes();
 	$resolvedor     = new ResolvedorOperacoes();
 	$concluidas     = $gerenciadorOps->processarConclusoes();
@@ -75,17 +107,17 @@ try {
 
 	foreach ($concluidas as $op) {
 		echo "     [OPERACAO] {$op->tipo} no distrito {$op->distritoAlvo} concluida.\n";
-
 		$mensagemResultado = $resolvedor->resolver($op);
 		if ($mensagemResultado) {
 			$clarim->publicarResultadoOperacao($mensagemResultado);
 		}
 	}
 
-	// 7. Log de combates
+	// 9. Log de combates
 	foreach ($eventos as $ev) {
-		if ($ev['tipo'] === 'combate') {
-			echo "     [COMBATE] {$ev['atacante']} atacou {$ev['defensor']} -> {$ev['resultado_texto']} (vencedor: {$ev['vencedor']})\n";
+		if (($ev['tipo'] ?? '') === 'combate') {
+			$sin = !empty($ev['derrota_sinistra']) ? ' [SINISTRA]' : '';
+			echo "     [COMBATE{$sin}] {$ev['atacante']} vs {$ev['defensor']} -> {$ev['resultado_texto']}\n";
 		}
 	}
 

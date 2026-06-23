@@ -5,6 +5,8 @@
  * (bot.php, tick.php, tick_semanal.php, etc) e tudo fica disponível.
  */
 
+date_default_timezone_set('America/Sao_Paulo');
+
 require_once __DIR__ . '/src/Env.php';
 
 Env::load(__DIR__ . '/.env');
@@ -29,6 +31,9 @@ require_once __DIR__ . '/src/Repositories/FinancasCCGRepository.php';
 require_once __DIR__ . '/src/Repositories/AdjacenciaRepository.php';
 require_once __DIR__ . '/src/Repositories/AcoesSemanaRepository.php';
 require_once __DIR__ . '/src/Repositories/MovimentoRepository.php';
+require_once __DIR__ . '/src/Repositories/QuestDistritoRepository.php';
+require_once __DIR__ . '/src/Repositories/ConfruntoPendenteRepository.php';
+require_once __DIR__ . '/src/Repositories/ConhecimentoCCGRepository.php';
 
 // Game
 require_once __DIR__ . '/src/Game/MotorEventos.php';

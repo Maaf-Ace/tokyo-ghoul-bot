@@ -37,6 +37,7 @@ class Database {
 
 		try {
 			self::$instancia = new PDO($dsn, $user, $pass, $opcoes);
+			self::$instancia->exec("SET time_zone = '-03:00'");
 		} catch (PDOException $e) {
 			// Não vazamos a mensagem completa (pode conter dados sensíveis de conexão) em produção
 			error_log('[Database] Falha na conexão: ' . $e->getMessage());

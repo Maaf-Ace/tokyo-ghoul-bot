@@ -1,5 +1,6 @@
 <?php
 
+use Discord\Builders\MessageBuilder;
 use Discord\Discord;
 use Discord\Parts\Channel\Message;
 use Discord\WebSockets\Event;
@@ -27,10 +28,12 @@ const CUSTO_INFORME          = 750;
 const CUSTO_INFORMANTE_FIXO  = 2000;
 
 // ─── Limites semanais ─────────────────────────────────────────────────────────
-const LIMITE_INVESTIGACOES = 3;
-const LIMITE_PATRULHAS     = 2;
-const LIMITE_CAMPANHAS     = 1;
-const LIMITE_PESQUISAS     = 1;
+const LIMITE_INVESTIGACOES  = 3;
+const LIMITE_PATRULHAS      = 2;
+const LIMITE_CAMPANHAS      = 1;
+const LIMITE_PESQUISAS      = 1;
+const CUSTO_ABASTECER       = 800;
+const LIMITE_ABASTECIMENTOS = 1;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -151,57 +154,78 @@ $discord->on('init', function (Discord $discord) {
 
         // ── !mapa ──────────────────────────────────────────────────────────────
         if (in_array(strtolower($content), ['!mapa', '!status_tokyo', '!distritos'])) {
-            $distritos   = (new DistritoRepository())->listarTodos();
-            $faccaoRepo  = new FaccaoRepository();
-            $eventoRepo  = new EventoMapaRepository();
-            $ccg         = $faccaoRepo->buscarPorId('ccg');
-            $posicaoCCG  = $ccg ? $ccg->posicaoAtual : 0;
+            $distritos     = (new DistritoRepository())->listarTodos();
+            $faccaoRepo    = new FaccaoRepository();
+            $eventoRepo    = new EventoMapaRepository();
+            $conhecimento  = (new ConhecimentoCCGRepository())->listarTodos(); // indexado por distrito_id
+            $ccg           = $faccaoRepo->buscarPorId('ccg');
+            $posicaoCCG    = $ccg ? $ccg->posicaoAtual : 0;
 
             if (empty($distritos)) {
                 $message->reply('Nenhum distrito cadastrado.');
                 return;
             }
 
-            $linhas = ["**MAPA TATICO DE TOQUIO** | CCG em #{$posicaoCCG}\n"];
+            $linhas = ["**MAPA TATICO DE TOQUIO — CCG** | Posicao: #{$posicaoCCG}\n"];
             foreach ($distritos as $d) {
-                $faccao    = $d->faccaoDominanteId ? $faccaoRepo->buscarPorId($d->faccaoDominanteId) : null;
-                $control   = $faccao ? "[{$faccao->nome}]" : '[Neutro]';
-                $eventos   = $eventoRepo->listarAtivosPorDistrito($d->id);
-                $evStr     = '';
-                foreach ($eventos as $e) {
-                    $evStr .= "\n   * {$e->titulo}";
+                $marcador = ($d->id === $posicaoCCG) ? ' **<-- CCG**' : '';
+                $saber    = $conhecimento[$d->id] ?? null;
+                $nivel    = $saber ? ($saber['nivel_conhecimento'] ?? 'desconhecido') : 'desconhecido';
+
+                if ($nivel === 'desconhecido') {
+                    $linhas[] = "? **#{$d->id} {$d->nome}**{$marcador} — [DESCONHECIDO]";
+                    continue;
                 }
-                $marcador  = ($d->id === $posicaoCCG) ? ' <-- CCG' : '';
-                $domBar    = barra($d->nivelDominacao);
-                $linhas[]  = nivelAlertaTexto($d->nivelAlerta) . " **#{$d->id} {$d->nome}**{$marcador} {$control}\n"
-                           . "   Dom: `{$domBar}` {$d->nivelDominacao}% | Alerta: {$d->nivelAlerta}/5 | Civil: {$d->apoioCivil}%"
-                           . ($d->bonusDominio ? "\n   + {$d->bonusDominio}" : '')
-                           . $evStr;
+
+                $faccaoNome = '[Neutro]';
+                if ($nivel !== 'basico' && $d->faccaoDominanteId) {
+                    $fac = $faccaoRepo->buscarPorId($d->faccaoDominanteId);
+                    $faccaoNome = $fac ? "[{$fac->nome}]" : '[Neutro]';
+                } elseif ($saber['faccao_conhecida']) {
+                    $fac = $faccaoRepo->buscarPorId($saber['faccao_conhecida']);
+                    $faccaoNome = $fac ? "[{$fac->nome}*]" : '[Neutro]'; // * = dado pode ser antigo
+                }
+
+                $eventos = $eventoRepo->listarAtivosPorDistrito($d->id);
+                $evStr   = '';
+                foreach ($eventos as $e) {
+                    $evStr .= "\n   ⚠ {$e->titulo}";
+                }
+
+                $linha = nivelAlertaTexto($d->nivelAlerta)
+                       . " **#{$d->id} {$d->nome}**{$marcador} {$faccaoNome}";
+
+                if ($nivel === 'basico') {
+                    $linha .= "\n   Alerta: {$d->nivelAlerta}/5 | Dom: {$d->nivelDominacao}%";
+                } elseif ($nivel === 'bom') {
+                    $linha .= "\n   Alerta: {$d->nivelAlerta}/5 | Dom: {$d->nivelDominacao}%"
+                            . " | Seg: {$d->seguranca} | Eco: {$d->economia} | Sup: {$d->suprimentosPop}";
+                } else { // critico
+                    $domBar = barra($d->nivelDominacao);
+                    $linha .= "\n   Dom: `{$domBar}` {$d->nivelDominacao}% | Alerta: {$d->nivelAlerta}/5"
+                            . "\n   Satisfacao: {$d->satisfacaoGeral}% (Seg:{$d->seguranca}|Eco:{$d->economia}|Sup:{$d->suprimentosPop})";
+                }
+
+                $linha   .= ($d->bonusDominio ? "\n   + {$d->bonusDominio}" : '') . $evStr;
+                $linhas[] = $linha;
             }
 
-            // Envia em partes para não ultrapassar o limite de 2000 caracteres do Discord
-            $parte   = '';
+            // Envia em partes para nao ultrapassar 2000 chars
+            $parte    = '';
             $primeiro = true;
             foreach ($linhas as $linha) {
                 $candidato = $parte . ($parte ? "\n\n" : '') . $linha;
                 if (strlen($candidato) > 1900) {
-                    if ($primeiro) {
-                        $message->reply($parte);
-                        $primeiro = false;
-                    } else {
-                        $message->channel->sendMessage($parte);
-                    }
+                    if ($primeiro) { $message->reply($parte); $primeiro = false; }
+                    else           { $message->channel->sendMessage($parte); }
                     $parte = $linha;
                 } else {
                     $parte = $candidato;
                 }
             }
             if ($parte !== '') {
-                if ($primeiro) {
-                    $message->reply($parte);
-                } else {
-                    $message->channel->sendMessage($parte);
-                }
+                if ($primeiro) $message->reply($parte);
+                else           $message->channel->sendMessage($parte);
             }
             return;
         }
@@ -569,6 +593,62 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
+        // ── !abastecer <id> ───────────────────────────────────────────────────
+        if (preg_match('/^!abastecer\s+(\d+)$/i', $content, $m)) {
+            $distritoId = (int) $m[1];
+            $faccaoRepo = new FaccaoRepository();
+            $opRepo     = new OperacaoRepository();
+            $adjRepo    = new AdjacenciaRepository();
+            $semRepo    = new AcoesSemanaRepository();
+            $sf         = new SistemaFinanceiro();
+            $distrito   = (new DistritoRepository())->buscarPorId($distritoId);
+
+            if (!$distrito) {
+                $message->reply("Distrito #{$distritoId} nao encontrado.");
+                return;
+            }
+
+            $alcance = verificarAlcanceCCG($distritoId, $faccaoRepo, $adjRepo);
+            if (!$alcance['ok']) {
+                $message->reply($alcance['mensagem']);
+                return;
+            }
+
+            if (!$semRepo->verificarLimite('ccg', 'abastecer', LIMITE_ABASTECIMENTOS)) {
+                $message->reply("Limite semanal de abastecimentos atingido (" . LIMITE_ABASTECIMENTOS . "/semana). Reset na proxima segunda-feira.");
+                return;
+            }
+
+            $slot = verificarSlotOperacao($faccaoRepo, $opRepo);
+            if (!$slot['ok']) {
+                $message->reply($slot['mensagem']);
+                return;
+            }
+
+            if ($opRepo->temPendente('abastecer', 'ccg', $distritoId)) {
+                $message->reply("Ja existe um abastecimento em andamento no **{$distrito->nome}**.");
+                return;
+            }
+
+            if (!$sf->gastar(CUSTO_ABASTECER)) {
+                $message->reply("Saldo insuficiente. Custo: Y" . number_format(CUSTO_ABASTECER, 0, ',', '.') . " | Saldo: Y" . number_format($sf->getOrcamento(), 0, ',', '.'));
+                return;
+            }
+
+            $semRepo->incrementar('ccg', 'abastecer');
+            $op = new Operacao('abastecer', 'ccg', $distritoId, 3, null, null, 'pendente', null, $authorId);
+            $opRepo->criar($op);
+
+            $usadas = $semRepo->getQuantidade('ccg', 'abastecer');
+            $message->reply(
+                "**[TOKYO-GO] Comboio de Abastecimento Autorizado**\n"
+              . "Area: **{$distrito->nome}** (#{$distritoId})\n"
+              . "Resultado em ~3h. Suprimentos populacionais +20~30.\n"
+              . "Y" . number_format(CUSTO_ABASTECER, 0, ',', '.') . " debitados. ({$usadas}/" . LIMITE_ABASTECIMENTOS . " abastecimento desta semana)"
+            );
+            return;
+        }
+
         // ── !informe — Rede de informantes (DM ao jogador) ────────────────────
         if (strtolower($content) === '!informe') {
             $sf        = new SistemaFinanceiro();
@@ -677,13 +757,46 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
+        // ── !concluir_quest <distrito_id> <quest_id> — Admin ─────────────────
+        if (preg_match('/^!concluir_quest\s+(\d+)\s+(\d+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $distritoId = (int) $m[1];
+            $questId    = (int) $m[2];
+            $questRepo  = new QuestDistritoRepository();
+            $dRepo      = new DistritoRepository();
+
+            $quest    = $questRepo->buscarPorId($questId);
+            $distrito = $dRepo->buscarPorId($distritoId);
+
+            if (!$quest || (int) $quest['distrito_id'] !== $distritoId) {
+                $message->reply("Quest #{$questId} nao encontrada no distrito #{$distritoId}.");
+                return;
+            }
+
+            $questRepo->concluir($questId, 'ccg');
+            $distritoAtualizado = $dRepo->buscarPorId($distritoId);
+            $conquistavel       = $questRepo->verificarConquista($distritoId, 'ccg', $distritoAtualizado ? $distritoAtualizado->satisfacaoGeral : 0);
+
+            $msg = "**[GM]** Quest **{$quest['titulo']}** marcada como concluida em **" . ($distrito ? $distrito->nome : "#{$distritoId}") . "**.\n"
+                 . "Tipo: {$quest['tipo']}";
+
+            if ($conquistavel) {
+                $dRepo->conquistar($distritoId, 'ccg');
+                $questRepo->seedParaDistrito($distritoId);
+                $msg .= "\n\n**CONQUISTA!** Satisfacao {$distritoAtualizado->satisfacaoGeral}% >= 80 e quests cumpridas."
+                      . "\nCCG agora domina **" . ($distrito ? $distrito->nome : "#{$distritoId}") . "**. Novas quests geradas.";
+            }
+
+            $message->reply($msg);
+            return;
+        }
+
         // ── !despacho <texto> — Admin ──────────────────────────────────────────
         if (preg_match('/^!despacho\s+(.+)$/si', $content, $m) && $authorId === '242459562655875073') {
             $webhookNoticias = Env::get('DISCORD_WEBHOOK_NOTICIAS', '');
             if ($webhookNoticias) {
                 $clarim = new ClarimToquio($webhookNoticias);
-                $clarim->publicarManual("[CLARIM DE TOQUIO] {$m[1]}");
-                $message->reply("Despacho publicado no Clarim de Toquio.");
+                $clarim->publicarManual("[TOKYO-GO] {$m[1]}");
+                $message->reply("Despacho publicado no Tokyo-GO.");
             } else {
                 $message->reply("Webhook de noticias nao configurado. Adicione DISCORD_WEBHOOK_NOTICIAS ao .env");
             }
@@ -699,11 +812,11 @@ $discord->on('init', function (Discord $discord) {
         }
 
         // ── !ajuda_tokyo / !comandos ───────────────────────────────────────────
-        if (in_array(strtolower($content), ['!ajuda_tokyo', '!comandos', '!help_tokyo'])) {
+        if (in_array(strtolower($content), ['!ajuda_tokyo', '!comandos', '!tokyo_ghoul'])) {
             $message->reply(
-                "**Comandos do Bot de Toquio — CCG Esquadrao Zero**\n\n"
+                "**[TOKYO-GO] Comandos — CCG Esquadrao Zero**\n\n"
               . "**Informacao**\n"
-              . "`!mapa` — Status de todos os distritos\n"
+              . "`!mapa` — Mapa tatico (conhecimento da CCG por distrito)\n"
               . "`!posicao` — Onde a CCG esta no mapa\n"
               . "`!faccoes` — Status de todas as faccoes\n"
               . "`!quinques` — Arsenal de Quinques da CCG\n"
@@ -714,18 +827,104 @@ $discord->on('init', function (Discord $discord) {
               . "**Movimento**\n"
               . "`!mover <id>` — Move a CCG para um distrito adjacente\n\n"
               . "**Operacoes** _(custam Y do orcamento — so em distritos adjacentes)_\n"
-              . "`!investigar <id>` — Investiga um distrito (Y" . number_format(CUSTO_INVESTIGAR, 0, ',', '.') . ", 2h, " . LIMITE_INVESTIGACOES . "/semana)\n"
-              . "`!patrulha <id>` — Patrulha pacifica (Y" . number_format(CUSTO_PATRULHA, 0, ',', '.') . ", 4h, " . LIMITE_PATRULHAS . "/semana)\n"
-              . "`!campanha <id>` — Campanha de midia (Y" . number_format(CUSTO_CAMPANHA, 0, ',', '.') . ", 6h, " . LIMITE_CAMPANHAS . "/semana)\n"
-              . "`!pesquisar` — Pesquisa de Quinque (Y" . number_format(CUSTO_PESQUISA, 0, ',', '.') . ", 6h, " . LIMITE_PESQUISAS . "/semana)\n"
-              . "`!informe` — Intel via rede de informantes (Y" . number_format(CUSTO_INFORME, 0, ',', '.') . ", DM)\n"
-              . "`!recrutar_informante <id>` — Informante fixo permanente (Y" . number_format(CUSTO_INFORMANTE_FIXO, 0, ',', '.') . ")\n\n"
+              . "`!investigar <id>` — Investiga (Y" . number_format(CUSTO_INVESTIGAR, 0, ',', '.') . ", 2h, " . LIMITE_INVESTIGACOES . "/sem) — eleva conhecimento do distrito\n"
+              . "`!patrulha <id>` — Patrulha (Y" . number_format(CUSTO_PATRULHA, 0, ',', '.') . ", 4h, " . LIMITE_PATRULHAS . "/sem) — seguranca +15~25\n"
+              . "`!campanha <id>` — Campanha de midia (Y" . number_format(CUSTO_CAMPANHA, 0, ',', '.') . ", 6h, " . LIMITE_CAMPANHAS . "/sem) — economia +20~35\n"
+              . "`!abastecer <id>` — Comboio civil (Y" . number_format(CUSTO_ABASTECER, 0, ',', '.') . ", 3h, " . LIMITE_ABASTECIMENTOS . "/sem) — suprimentos +20~30\n"
+              . "`!pesquisar` — Quinque (Y" . number_format(CUSTO_PESQUISA, 0, ',', '.') . ", 6h, " . LIMITE_PESQUISAS . "/sem)\n"
+              . "`!informe` — Intel via informantes (Y" . number_format(CUSTO_INFORME, 0, ',', '.') . ", DM)\n"
+              . "`!recrutar_informante <id>` — Informante fixo (Y" . number_format(CUSTO_INFORMANTE_FIXO, 0, ',', '.') . ")\n\n"
+              . "**Combate**\n"
+              . "Quando ghouls atacarem, botoes aparecerao no canal de ops — Divisao Alfa escolhe a tatica em 10 min.\n\n"
               . "**Utilidades**\n"
               . "`1d20`, `2d6+3`, etc. — Rolagem de dados\n"
             );
             return;
         }
 
+    });
+
+    // ── Botões de tática de combate ────────────────────────────────────────────
+    $discord->on(Event::INTERACTION_CREATE, function ($interaction, Discord $discord) {
+
+        // Somente MESSAGE_COMPONENT (cliques em botoes) = tipo 3
+        if ($interaction->type !== 3) return;
+
+        $customId = $interaction->data->custom_id ?? '';
+
+        // Formato: tatica_{confrontoId}_{emboscada|rush|defesa}
+        if (!preg_match('/^tatica_([^_]+)_(emboscada|rush|defesa)$/', $customId, $m)) return;
+
+        [, $confrontoId, $taticaEscolhida] = $m;
+
+        // Verifica cargo "Divisao Alfa"
+        $temRole = false;
+        if ($interaction->member && $interaction->member->roles) {
+            foreach ($interaction->member->roles as $role) {
+                if (mb_strtolower($role->name) === mb_strtolower('Divisão Alfa')) {
+                    $temRole = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$temRole) {
+            $interaction->respondWithMessage(
+                MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem escolher táticas de combate.'),
+                true
+            );
+            return;
+        }
+
+        $cpRepo    = new ConfruntoPendenteRepository();
+        $confronto = $cpRepo->buscarPorId($confrontoId);
+
+        if (!$confronto || $confronto['resolvido']) {
+            $interaction->respondWithMessage(
+                MessageBuilder::new()->setContent('Este confronto ja foi resolvido ou nao existe.'),
+                true
+            );
+            return;
+        }
+
+        if (strtotime($confronto['expira_em']) < time()) {
+            $interaction->respondWithMessage(
+                MessageBuilder::new()->setContent('O tempo de resposta expirou. O confronto sera resolvido automaticamente no proximo tick.'),
+                true
+            );
+            return;
+        }
+
+        $faccaoRepo = new FaccaoRepository();
+        $atacante   = $faccaoRepo->buscarPorId($confronto['atacante_id']);
+        $ccg        = $faccaoRepo->buscarPorId('ccg');
+
+        if (!$atacante || !$ccg) {
+            $interaction->respondWithMessage(
+                MessageBuilder::new()->setContent('Erro interno: faccao nao encontrada.'),
+                true
+            );
+            return;
+        }
+
+        $motor     = new MotorEventos();
+        $resultado = $motor->resolverConfronto($atacante, $ccg, $confronto['tatica_atacante'], $taticaEscolhida);
+        $cpRepo->marcarResolvido($confrontoId);
+
+        $tAtc     = ucfirst($confronto['tatica_atacante']);
+        $tDef     = ucfirst($taticaEscolhida);
+        $vencedor = $resultado['vencedor'];
+
+        $msg = "**[TOKYO-GO | CONFRONTO RESOLVIDO]**\n"
+             . "**{$atacante->nome}** ({$tAtc}) vs **CCG** ({$tDef})\n"
+             . "Forca atacante: {$resultado['forca_final_atacante']} | Forca defesa: {$resultado['forca_final_defensor']}\n"
+             . "**Vencedor: {$vencedor}** — {$resultado['resultado_texto']}";
+
+        if (!empty($resultado['derrota_sinistra'])) {
+            $msg .= "\n**[DERROTA SINISTRA]** Esmagamento total — suprimentos adicionais perdidos!";
+        }
+
+        $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
     });
 
 });
