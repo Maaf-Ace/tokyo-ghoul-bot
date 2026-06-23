@@ -121,11 +121,13 @@ $sqlFaccao = "INSERT INTO faccoes
      fome, agressividade, sigilo, postura_civis, nivel_alerta, posicao_atual)
     VALUES
     (:id, :nome, :distrito_base, :tatica_favorita, :poder_militar, :suprimentos,
-     :fome, :agressividade, :sigilo, :postura_civis, 1, :distrito_base)";
+     :fome, :agressividade, :sigilo, :postura_civis, 1, :posicao_atual)";
 
 $stmt = $db->prepare($sqlFaccao);
 foreach ($faccoes as $f) {
-    $stmt->execute($f);
+    $params = $f;
+    $params['posicao_atual'] = $f['distrito_base'];
+    $stmt->execute($params);
     echo "  [OK] Faccao '{$f['nome']}' inserida (base #{$f['distrito_base']}).\n";
 }
 
