@@ -37,6 +37,29 @@ const LIMITE_ABASTECIMENTOS = 1;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Responde a uma interaction do Discord via REST síncrono (file_get_contents).
+ * Isso evita o problema de bloqueio do loop ReactPHP com chamadas PDO.
+ */
+function respondToInteraction($interaction, string $content, bool $ephemeral = false): void {
+    $url     = "https://discord.com/api/v10/interactions/{$interaction->id}/{$interaction->token}/callback";
+    $flags   = $ephemeral ? 64 : 0;
+    $payload = json_encode(
+        ['type' => 4, 'data' => ['content' => $content, 'flags' => $flags]],
+        JSON_UNESCAPED_UNICODE
+    );
+    $ctx = stream_context_create([
+        'http' => [
+            'method'        => 'POST',
+            'header'        => "Content-Type: application/json\r\n",
+            'content'       => $payload,
+            'ignore_errors' => true,
+            'timeout'       => 5,
+        ],
+    ]);
+    @file_get_contents($url, false, $ctx);
+}
+
 function barra(int $valor, int $max = 100): string {
     $preenchido = min(10, (int) ($valor / ($max / 10)));
     return str_repeat('█', $preenchido) . str_repeat('░', 10 - $preenchido);
@@ -921,22 +944,24 @@ $discord->on('init', function (Discord $discord) {
         if ((int) $interaction->type !== 3) return;
 
         $customId = $interaction->data->custom_id ?? '';
+        if (empty($customId)) return;
+
+        try {
 
         // ─── Helper: verifica cargo "Divisao Alfa" via cache do servidor ──────
         $verificarRole = function () use ($interaction, $discord): bool {
-            // Admin sempre pode interagir
             $userId = $interaction->member?->user?->id ?? $interaction->user?->id ?? '';
             if ($userId === '242459562655875073') return true;
 
-            $guild = $discord->guilds->get('id', $interaction->guild_id ?? '');
-            if (!$guild || !$interaction->member) return false;
+            $guildId = $interaction->guild_id ?? '';
+            $guild   = $guildId ? $discord->guilds->get('id', $guildId) : null;
+            if (!$interaction->member) return false;
 
             foreach ($interaction->member->roles as $role) {
-                // roles pode conter objetos Role OU IDs simples dependendo do cache
                 $roleId    = is_object($role) ? ($role->id ?? '') : (string) $role;
-                $guildRole = $guild->roles->get('id', $roleId);
+                $guildRole = $guild ? $guild->roles->get('id', $roleId) : null;
                 $roleName  = $guildRole ? $guildRole->name : (is_object($role) ? ($role->name ?? '') : '');
-                if (mb_strtolower($roleName) === mb_strtolower('Divisão Alfa')) return true;
+                if ($roleName && mb_strtolower($roleName) === mb_strtolower('Divisão Alfa')) return true;
             }
             return false;
         };
@@ -946,10 +971,7 @@ $discord->on('init', function (Discord $discord) {
             [, $confrontoId, $taticaEscolhida] = $m;
 
             if (!$verificarRole()) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem escolher táticas de combate.'),
-                    true
-                );
+                respondToInteraction($interaction, 'Apenas membros da **Divisao Alfa** podem escolher taticas de combate.', true);
                 return;
             }
 
@@ -957,18 +979,12 @@ $discord->on('init', function (Discord $discord) {
             $confronto = $cpRepo->buscarPorId($confrontoId);
 
             if (!$confronto || $confronto['resolvido']) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('Este confronto ja foi resolvido ou nao existe.'),
-                    true
-                );
+                respondToInteraction($interaction, 'Este confronto ja foi resolvido ou nao existe.', true);
                 return;
             }
 
             if (strtotime($confronto['expira_em']) < time()) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('O tempo de resposta expirou. O confronto sera resolvido no proximo tick.'),
-                    true
-                );
+                respondToInteraction($interaction, 'O tempo de resposta expirou. O confronto sera resolvido no proximo tick.', true);
                 return;
             }
 
@@ -977,10 +993,7 @@ $discord->on('init', function (Discord $discord) {
             $ccg        = $faccaoRepo->buscarPorId('ccg');
 
             if (!$atacante || !$ccg) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('Erro interno: faccao nao encontrada.'),
-                    true
-                );
+                respondToInteraction($interaction, 'Erro interno: faccao nao encontrada.', true);
                 return;
             }
 
@@ -1001,7 +1014,7 @@ $discord->on('init', function (Discord $discord) {
                 $msg .= "\n**[DERROTA SINISTRA]** Esmagamento total — suprimentos adicionais perdidos!";
             }
 
-            $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
+            respondToInteraction($interaction, $msg);
             return;
         }
 
@@ -1010,10 +1023,7 @@ $discord->on('init', function (Discord $discord) {
             $opId = $m[1];
 
             if (!$verificarRole()) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem interceptar operações ghoul.'),
-                    true
-                );
+                respondToInteraction($interaction, 'Apenas membros da **Divisao Alfa** podem interceptar operacoes ghoul.', true);
                 return;
             }
 
@@ -1025,10 +1035,7 @@ $discord->on('init', function (Discord $discord) {
             }
 
             if (!$op) {
-                $interaction->respondWithMessage(
-                    MessageBuilder::new()->setContent('Operacao ja foi concluida ou nao existe mais.'),
-                    true
-                );
+                respondToInteraction($interaction, 'Operacao ja foi concluida ou nao existe mais.', true);
                 return;
             }
 
@@ -1040,18 +1047,22 @@ $discord->on('init', function (Discord $discord) {
             $tipoTrad   = ['alimentar' => 'alimentacao', 'cacar' => 'cacada', 'contrabandear' => 'contrabando', 'recrutar' => 'recrutamento'];
             $tipoStr    = $tipoTrad[$op['tipo']] ?? $op['tipo'];
 
-            $msg = "**[TOKYO-GO | INTERCEPTACAO BEM-SUCEDIDA]**\n"
-                 . "Operacao de **{$tipoStr}** da **{$nomeFac}** foi interrompida!\n"
-                 . "A faccao recua sem colher nenhum beneficio. Sigilo comprometido.";
-
-            // Penaliza sigilo da facção
             if ($fac) {
                 $fac->sigilo = max(0, $fac->sigilo - rand(10, 20));
                 $faccaoRepo->atualizar($fac);
             }
 
-            $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
+            $msg = "**[TOKYO-GO | INTERCEPTACAO BEM-SUCEDIDA]**\n"
+                 . "Operacao de **{$tipoStr}** da **{$nomeFac}** foi interrompida!\n"
+                 . "A faccao recua sem colher nenhum beneficio. Sigilo comprometido.";
+
+            respondToInteraction($interaction, $msg);
             return;
+        }
+
+        } catch (Throwable $e) {
+            echo "[INTERACTION ERROR] " . $e->getMessage() . " em " . $e->getFile() . ":" . $e->getLine() . "\n";
+            respondToInteraction($interaction, 'Erro interno. Verifique os logs do bot.', true);
         }
     });
 
