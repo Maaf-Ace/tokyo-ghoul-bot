@@ -38,18 +38,13 @@ const LIMITE_ABASTECIMENTOS = 1;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Responde a uma interaction do Discord via REST síncrono (file_get_contents).
- * Isso evita o problema de bloqueio do loop ReactPHP com chamadas PDO.
+ * Resposta IMEDIATA a uma interaction (tipo 4). Use apenas para respostas rápidas
+ * que não precisam de processamento pesado (ex: erro de permissão, "já resolvido").
  */
 function respondToInteraction($interaction, string $content, bool $ephemeral = false): void {
     $id    = $interaction->id    ?? '';
     $token = $interaction->token ?? '';
-    echo "[INTERACTION RESPOND] id={$id} ephemeral=" . ($ephemeral ? 'true' : 'false') . "\n";
-
-    if (empty($id) || empty($token)) {
-        echo "[INTERACTION RESPOND] ERRO: id ou token vazios!\n";
-        return;
-    }
+    if (empty($id) || empty($token)) return;
 
     $url     = "https://discord.com/api/v10/interactions/{$id}/{$token}/callback";
     $flags   = $ephemeral ? 64 : 0;
@@ -58,16 +53,48 @@ function respondToInteraction($interaction, string $content, bool $ephemeral = f
         JSON_UNESCAPED_UNICODE
     );
     $ctx = stream_context_create([
-        'http' => [
-            'method'        => 'POST',
-            'header'        => "Content-Type: application/json\r\n",
-            'content'       => $payload,
-            'ignore_errors' => true,
-            'timeout'       => 5,
-        ],
+        'http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n",
+                   'content' => $payload, 'ignore_errors' => true, 'timeout' => 5],
     ]);
-    $resp = @file_get_contents($url, false, $ctx);
-    echo "[INTERACTION RESPOND] resp=" . ($resp !== false ? substr($resp, 0, 200) : 'FALHA/TIMEOUT') . "\n";
+    @file_get_contents($url, false, $ctx);
+}
+
+/**
+ * Defer imediato (tipo 5 = "Bot está pensando..."). Deve ser chamado ANTES de qualquer
+ * query ao banco, para garantir resposta ao Discord em < 1 segundo.
+ * Depois use followupInteraction() para enviar o resultado.
+ */
+function deferInteraction($interaction): void {
+    $id    = $interaction->id    ?? '';
+    $token = $interaction->token ?? '';
+    if (empty($id) || empty($token)) return;
+
+    $url = "https://discord.com/api/v10/interactions/{$id}/{$token}/callback";
+    $ctx = stream_context_create([
+        'http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n",
+                   'content' => json_encode(['type' => 5]), 'ignore_errors' => true, 'timeout' => 5],
+    ]);
+    @file_get_contents($url, false, $ctx);
+}
+
+/**
+ * Envia mensagem de follow-up após um deferInteraction().
+ * $appId = ID do bot (mesmo que user ID, ex: 1333121654783479890).
+ */
+function followupInteraction(string $appId, string $token, string $content, bool $ephemeral = false): void {
+    if (empty($appId) || empty($token)) return;
+
+    $url   = "https://discord.com/api/v10/webhooks/{$appId}/{$token}";
+    $flags = $ephemeral ? 64 : 0;
+    $payload = json_encode(
+        ['content' => $content, 'flags' => $flags],
+        JSON_UNESCAPED_UNICODE
+    );
+    $ctx = stream_context_create([
+        'http' => ['method' => 'POST', 'header' => "Content-Type: application/json\r\n",
+                   'content' => $payload, 'ignore_errors' => true, 'timeout' => 5],
+    ]);
+    @file_get_contents($url, false, $ctx);
 }
 
 function barra(int $valor, int $max = 100): string {
@@ -1000,12 +1027,17 @@ $discord->on('init', function (Discord $discord) {
                 return;
             }
 
+            // Defer IMEDIATO antes de qualquer query — garante resposta ao Discord em < 1s
+            $appId = $discord->application->id ?? '';
+            $token = $interaction->token ?? '';
+            deferInteraction($interaction);
+
             $faccaoRepo = new FaccaoRepository();
             $atacante   = $faccaoRepo->buscarPorId($confronto['atacante_id']);
             $ccg        = $faccaoRepo->buscarPorId('ccg');
 
             if (!$atacante || !$ccg) {
-                respondToInteraction($interaction, 'Erro interno: faccao nao encontrada.', true);
+                followupInteraction($appId, $token, 'Erro interno: faccao nao encontrada.');
                 return;
             }
 
@@ -1026,7 +1058,7 @@ $discord->on('init', function (Discord $discord) {
                 $msg .= "\n**[DERROTA SINISTRA]** Esmagamento total — suprimentos adicionais perdidos!";
             }
 
-            respondToInteraction($interaction, $msg);
+            followupInteraction($appId, $token, $msg);
             return;
         }
 
@@ -1051,6 +1083,10 @@ $discord->on('init', function (Discord $discord) {
                 return;
             }
 
+            $appId = $discord->application->id ?? '';
+            $token = $interaction->token ?? '';
+            deferInteraction($interaction);
+
             $opGhoulRepo->marcarInterceptada($opId);
 
             $faccaoRepo = new FaccaoRepository();
@@ -1068,7 +1104,7 @@ $discord->on('init', function (Discord $discord) {
                  . "Operacao de **{$tipoStr}** da **{$nomeFac}** foi interrompida!\n"
                  . "A faccao recua sem colher nenhum beneficio. Sigilo comprometido.";
 
-            respondToInteraction($interaction, $msg);
+            followupInteraction($appId, $token, $msg);
             return;
         }
 
