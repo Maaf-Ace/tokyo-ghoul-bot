@@ -811,6 +811,73 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
+        // ── !batalha_teste — Força um confronto de teste (Admin) ─────────────
+        if (strtolower($content) === '!batalha_teste' && $authorId === '242459562655875073') {
+            $faccaoRepo  = new FaccaoRepository();
+            $faccoesGhoul = $faccaoRepo->listarFaccoesGhoul();
+            $ccg         = $faccaoRepo->buscarPorId('ccg');
+
+            if (empty($faccoesGhoul) || !$ccg) {
+                $message->reply("Nenhuma faccao ghoul ou CCG nao encontrada.");
+                return;
+            }
+
+            $atacante    = $faccoesGhoul[array_rand($faccoesGhoul)];
+            $taticas     = ['emboscada', 'rush', 'defesa'];
+            $taticaAtc   = $taticas[array_rand($taticas)];
+            $confrontoId = 'teste_' . bin2hex(random_bytes(6));
+
+            $botToken   = Env::get('DISCORD_TOKEN', '');
+            $opsChannel = Env::get('DISCORD_OPS_CHANNEL_ID', '');
+            $clarim     = new ClarimToquio('', '', $botToken, $opsChannel);
+            $msgId      = $clarim->publicarAlertaConfronto($confrontoId, $atacante, (int) $ccg->posicaoAtual, $taticaAtc);
+
+            if ($msgId) {
+                $cpRepo = new ConfruntoPendenteRepository();
+                $expira = date('Y-m-d H:i:s', time() + 600);
+                $cpRepo->criar($confrontoId, $atacante->id, (int) $ccg->posicaoAtual, $taticaAtc, $msgId, $expira);
+
+                $message->reply(
+                    "**[TESTE DE CONFRONTO]** Criado com sucesso!\n"
+                  . "Atacante: **{$atacante->nome}** | Tatica: **{$taticaAtc}**\n"
+                  . "ID: `{$confrontoId}`\n"
+                  . "Botoes postados no canal de ops. Voce tem 10 min para responder.\n"
+                  . "_(Divisao Alfa ou admin pode clicar)_"
+                );
+            } else {
+                $message->reply(
+                    "**[ERRO]** Nao foi possivel postar os botoes no canal de ops.\n"
+                  . "Verifique se `DISCORD_OPS_CHANNEL_ID` esta configurado no .env da VM.\n"
+                  . "ID seria: `{$confrontoId}`"
+                );
+            }
+            return;
+        }
+
+        // ── !atividades_ghoul — Atividades ghoul em andamento (Admin) ─────────
+        if (strtolower($content) === '!atividades_ghoul' && $authorId === '242459562655875073') {
+            $pendentes  = (new OperacaoGhoulRepository())->listarPendentes();
+            if (empty($pendentes)) {
+                $message->reply("**Atividades Ghoul**\nNenhuma atividade em andamento.");
+                return;
+            }
+
+            $fRepo  = new FaccaoRepository();
+            $dRepo  = new DistritoRepository();
+            $linhas = ["**Atividades Ghoul em Andamento**\n"];
+            foreach ($pendentes as $op) {
+                $fac  = $fRepo->buscarPorId($op['faccao_id']);
+                $dist = ($op['distrito_id'] > 0) ? $dRepo->buscarPorId((int) $op['distrito_id']) : null;
+                $fim  = date('d/m H:i', strtotime($op['data_fim']));
+                $alrt = $op['alerta_enviado'] ? ' [alerta enviado]' : '';
+                $linhas[] = "**" . ($fac ? $fac->nome : $op['faccao_id']) . "** — {$op['tipo']}"
+                          . ($dist ? " em {$dist->nome}" : '')
+                          . " | Conclui: {$fim}{$alrt}";
+            }
+            $message->reply(implode("\n", $linhas));
+            return;
+        }
+
         // ── !ajuda_tokyo / !comandos ───────────────────────────────────────────
         if (in_array(strtolower($content), ['!ajuda_tokyo', '!comandos', '!tokyo_ghoul'])) {
             $message->reply(
@@ -844,87 +911,148 @@ $discord->on('init', function (Discord $discord) {
 
     });
 
-    // ── Botões de tática de combate ────────────────────────────────────────────
+    // ── !batalha_teste — Força um confronto de teste (Admin) ──────────────────
+    // (declarado aqui para ser acessível dentro do MESSAGE_CREATE handler abaixo)
+
+    // ── Botões de tática de combate e interceptação ────────────────────────────
     $discord->on(Event::INTERACTION_CREATE, function ($interaction, Discord $discord) {
 
         // Somente MESSAGE_COMPONENT (cliques em botoes) = tipo 3
-        if ($interaction->type !== 3) return;
+        if ((int) $interaction->type !== 3) return;
 
         $customId = $interaction->data->custom_id ?? '';
 
-        // Formato: tatica_{confrontoId}_{emboscada|rush|defesa}
-        if (!preg_match('/^tatica_([^_]+)_(emboscada|rush|defesa)$/', $customId, $m)) return;
+        // ─── Helper: verifica cargo "Divisao Alfa" via cache do servidor ──────
+        $verificarRole = function () use ($interaction, $discord): bool {
+            // Admin sempre pode interagir
+            $userId = $interaction->member?->user?->id ?? $interaction->user?->id ?? '';
+            if ($userId === '242459562655875073') return true;
 
-        [, $confrontoId, $taticaEscolhida] = $m;
+            $guild = $discord->guilds->get('id', $interaction->guild_id ?? '');
+            if (!$guild || !$interaction->member) return false;
 
-        // Verifica cargo "Divisao Alfa"
-        $temRole = false;
-        if ($interaction->member && $interaction->member->roles) {
             foreach ($interaction->member->roles as $role) {
-                if (mb_strtolower($role->name) === mb_strtolower('Divisão Alfa')) {
-                    $temRole = true;
-                    break;
-                }
+                // roles pode conter objetos Role OU IDs simples dependendo do cache
+                $roleId    = is_object($role) ? ($role->id ?? '') : (string) $role;
+                $guildRole = $guild->roles->get('id', $roleId);
+                $roleName  = $guildRole ? $guildRole->name : (is_object($role) ? ($role->name ?? '') : '');
+                if (mb_strtolower($roleName) === mb_strtolower('Divisão Alfa')) return true;
             }
-        }
+            return false;
+        };
 
-        if (!$temRole) {
-            $interaction->respondWithMessage(
-                MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem escolher táticas de combate.'),
-                true
-            );
+        // ── Tática de combate: tatica_{confrontoId}_{emboscada|rush|defesa} ──
+        if (preg_match('/^tatica_([^_]+)_(emboscada|rush|defesa)$/', $customId, $m)) {
+            [, $confrontoId, $taticaEscolhida] = $m;
+
+            if (!$verificarRole()) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem escolher táticas de combate.'),
+                    true
+                );
+                return;
+            }
+
+            $cpRepo    = new ConfruntoPendenteRepository();
+            $confronto = $cpRepo->buscarPorId($confrontoId);
+
+            if (!$confronto || $confronto['resolvido']) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('Este confronto ja foi resolvido ou nao existe.'),
+                    true
+                );
+                return;
+            }
+
+            if (strtotime($confronto['expira_em']) < time()) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('O tempo de resposta expirou. O confronto sera resolvido no proximo tick.'),
+                    true
+                );
+                return;
+            }
+
+            $faccaoRepo = new FaccaoRepository();
+            $atacante   = $faccaoRepo->buscarPorId($confronto['atacante_id']);
+            $ccg        = $faccaoRepo->buscarPorId('ccg');
+
+            if (!$atacante || !$ccg) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('Erro interno: faccao nao encontrada.'),
+                    true
+                );
+                return;
+            }
+
+            $motor     = new MotorEventos();
+            $resultado = $motor->resolverConfronto($atacante, $ccg, $confronto['tatica_atacante'], $taticaEscolhida);
+            $cpRepo->marcarResolvido($confrontoId);
+
+            $tAtc     = ucfirst($confronto['tatica_atacante']);
+            $tDef     = ucfirst($taticaEscolhida);
+            $vencedor = $resultado['vencedor'];
+
+            $msg = "**[TOKYO-GO | CONFRONTO RESOLVIDO]**\n"
+                 . "**{$atacante->nome}** ({$tAtc}) vs **CCG** ({$tDef})\n"
+                 . "Forca atacante: {$resultado['forca_final_atacante']} | Forca defesa: {$resultado['forca_final_defensor']}\n"
+                 . "**Vencedor: {$vencedor}** — {$resultado['resultado_texto']}";
+
+            if (!empty($resultado['derrota_sinistra'])) {
+                $msg .= "\n**[DERROTA SINISTRA]** Esmagamento total — suprimentos adicionais perdidos!";
+            }
+
+            $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
             return;
         }
 
-        $cpRepo    = new ConfruntoPendenteRepository();
-        $confronto = $cpRepo->buscarPorId($confrontoId);
+        // ── Interceptação ghoul: interceptar_{opId} ────────────────────────
+        if (preg_match('/^interceptar_(.+)$/', $customId, $m)) {
+            $opId = $m[1];
 
-        if (!$confronto || $confronto['resolvido']) {
-            $interaction->respondWithMessage(
-                MessageBuilder::new()->setContent('Este confronto ja foi resolvido ou nao existe.'),
-                true
-            );
+            if (!$verificarRole()) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('Apenas membros da **Divisão Alfa** podem interceptar operações ghoul.'),
+                    true
+                );
+                return;
+            }
+
+            $opGhoulRepo = new OperacaoGhoulRepository();
+            $pendentes   = $opGhoulRepo->listarPendentes();
+            $op          = null;
+            foreach ($pendentes as $p) {
+                if ($p['id'] === $opId) { $op = $p; break; }
+            }
+
+            if (!$op) {
+                $interaction->respondWithMessage(
+                    MessageBuilder::new()->setContent('Operacao ja foi concluida ou nao existe mais.'),
+                    true
+                );
+                return;
+            }
+
+            $opGhoulRepo->marcarInterceptada($opId);
+
+            $faccaoRepo = new FaccaoRepository();
+            $fac        = $faccaoRepo->buscarPorId($op['faccao_id']);
+            $nomeFac    = $fac ? $fac->nome : $op['faccao_id'];
+            $tipoTrad   = ['alimentar' => 'alimentacao', 'cacar' => 'cacada', 'contrabandear' => 'contrabando', 'recrutar' => 'recrutamento'];
+            $tipoStr    = $tipoTrad[$op['tipo']] ?? $op['tipo'];
+
+            $msg = "**[TOKYO-GO | INTERCEPTACAO BEM-SUCEDIDA]**\n"
+                 . "Operacao de **{$tipoStr}** da **{$nomeFac}** foi interrompida!\n"
+                 . "A faccao recua sem colher nenhum beneficio. Sigilo comprometido.";
+
+            // Penaliza sigilo da facção
+            if ($fac) {
+                $fac->sigilo = max(0, $fac->sigilo - rand(10, 20));
+                $faccaoRepo->atualizar($fac);
+            }
+
+            $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
             return;
         }
-
-        if (strtotime($confronto['expira_em']) < time()) {
-            $interaction->respondWithMessage(
-                MessageBuilder::new()->setContent('O tempo de resposta expirou. O confronto sera resolvido automaticamente no proximo tick.'),
-                true
-            );
-            return;
-        }
-
-        $faccaoRepo = new FaccaoRepository();
-        $atacante   = $faccaoRepo->buscarPorId($confronto['atacante_id']);
-        $ccg        = $faccaoRepo->buscarPorId('ccg');
-
-        if (!$atacante || !$ccg) {
-            $interaction->respondWithMessage(
-                MessageBuilder::new()->setContent('Erro interno: faccao nao encontrada.'),
-                true
-            );
-            return;
-        }
-
-        $motor     = new MotorEventos();
-        $resultado = $motor->resolverConfronto($atacante, $ccg, $confronto['tatica_atacante'], $taticaEscolhida);
-        $cpRepo->marcarResolvido($confrontoId);
-
-        $tAtc     = ucfirst($confronto['tatica_atacante']);
-        $tDef     = ucfirst($taticaEscolhida);
-        $vencedor = $resultado['vencedor'];
-
-        $msg = "**[TOKYO-GO | CONFRONTO RESOLVIDO]**\n"
-             . "**{$atacante->nome}** ({$tAtc}) vs **CCG** ({$tDef})\n"
-             . "Forca atacante: {$resultado['forca_final_atacante']} | Forca defesa: {$resultado['forca_final_defensor']}\n"
-             . "**Vencedor: {$vencedor}** — {$resultado['resultado_texto']}";
-
-        if (!empty($resultado['derrota_sinistra'])) {
-            $msg .= "\n**[DERROTA SINISTRA]** Esmagamento total — suprimentos adicionais perdidos!";
-        }
-
-        $interaction->respondWithMessage(MessageBuilder::new()->setContent($msg));
     });
 
 });

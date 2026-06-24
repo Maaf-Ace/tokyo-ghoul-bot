@@ -165,7 +165,7 @@ class MotorEventos {
 	 * Se o alvo for a CCG e houver ClarimToquio + cpRepo injetados,
 	 * cria um confronto_pendente em vez de resolver imediatamente.
 	 */
-	public function tentarIniciarConflito(Faccao $faccao, array $todasFaccoes, int $chancePercentual = 30): ?array {
+	public function tentarIniciarConflito(Faccao $faccao, array $todasFaccoes, int $chancePercentual = 15): ?array {
 		if ($faccao->id === 'ccg')             return null;
 		if (rand(1, 100) > $chancePercentual)  return null;
 

@@ -1,120 +1,237 @@
 <?php
 
+/**
+ * Gerencia as atividades agendadas das facções ghoul.
+ *
+ * Cada facção pode ter uma atividade pendente por vez. A atividade é agendada
+ * com um timer; quando o timer expira, o próximo tick resolve os efeitos.
+ *
+ * Limites semanais variam por postura_civis:
+ *   predadora  → caça intensa, pouca alimentação discreta
+ *   indiferente→ balanceado
+ *   protetora  → prefere alimentar (criminosos) em vez de caçar inocentes
+ */
 class RotinasSobrevivencia {
 
-	private DistritoRepository $distritoRepo;
-	private FaccaoRepository   $faccaoRepo;
+    private DistritoRepository      $distritoRepo;
+    private FaccaoRepository        $faccaoRepo;
+    private OperacaoGhoulRepository $opGhoulRepo;
 
-	public function __construct(
-		?DistritoRepository $distritoRepo = null,
-		?FaccaoRepository   $faccaoRepo   = null
-	) {
-		$this->distritoRepo = $distritoRepo ?? new DistritoRepository();
-		$this->faccaoRepo   = $faccaoRepo   ?? new FaccaoRepository();
-	}
+    // Duração em horas por tipo de atividade
+    private const DURACOES = [
+        'alimentar'     => 1.0,
+        'cacar'         => 2.0,
+        'contrabandear' => 2.5,
+        'recrutar'      => 3.0,
+    ];
 
-	public function executarParaFaccao(Faccao $faccao): array {
-		$acao = $this->escolherAcao($faccao);
-		return match ($acao) {
-			'caca'         => $this->cacar($faccao),
-			'contrabando'  => $this->contrabandear($faccao),
-			'recrutamento' => $this->recrutar($faccao),
-			default        => [
-				'tipo'        => 'sobrevivencia',
-				'acao'        => 'inativa',
-				'faccao'      => $faccao->nome,
-				'faccao_id'   => $faccao->id,
-				'distrito_id' => null,
-				'descricao'   => "{$faccao->nome} permaneceu inativa neste ciclo.",
-			],
-		};
-	}
+    // Limites semanais por postura_civis
+    private const LIMITES = [
+        'predadora'   => ['alimentar' => 1, 'cacar' => 4, 'recrutar' => 2, 'contrabandear' => 2],
+        'indiferente' => ['alimentar' => 2, 'cacar' => 2, 'recrutar' => 2, 'contrabandear' => 3],
+        'protetora'   => ['alimentar' => 4, 'cacar' => 1, 'recrutar' => 2, 'contrabandear' => 1],
+    ];
 
-	private function escolherAcao(Faccao $faccao): string {
-		$pesos = [
-			'caca'         => max(1, $faccao->fome),
-			'contrabando'  => max(1, 100 - $faccao->suprimentos),
-			'recrutamento' => max(1, 100 - $faccao->poderMilitar),
-		];
-		$total     = array_sum($pesos);
-		$sorteio   = rand(1, $total);
-		$acumulado = 0;
-		foreach ($pesos as $acao => $peso) {
-			$acumulado += $peso;
-			if ($sorteio <= $acumulado) return $acao;
-		}
-		return 'caca';
-	}
+    public function __construct(
+        ?DistritoRepository      $distritoRepo = null,
+        ?FaccaoRepository        $faccaoRepo   = null,
+        ?OperacaoGhoulRepository $opGhoulRepo  = null
+    ) {
+        $this->distritoRepo = $distritoRepo ?? new DistritoRepository();
+        $this->faccaoRepo   = $faccaoRepo   ?? new FaccaoRepository();
+        $this->opGhoulRepo  = $opGhoulRepo  ?? new OperacaoGhoulRepository();
+    }
 
-	private function cacar(Faccao $faccao): array {
-		$reducaoFome   = rand(10, 25);
-		$aumentoAlerta = rand(1, 3);
+    /**
+     * Agenda uma atividade para a facção, se ela não tiver uma pendente e
+     * ainda tiver cota semanal disponível.
+     * Retorna os dados do agendamento, ou null se nada foi agendado.
+     */
+    public function agendarParaFaccao(Faccao $faccao): ?array {
+        if ($this->opGhoulRepo->temPendente($faccao->id)) return null;
 
-		$faccao->fome          = max(0, $faccao->fome - $reducaoFome);
-		$faccao->agressividade = min(100, $faccao->agressividade + 2);
-		$this->faccaoRepo->atualizar($faccao);
+        $postura = $faccao->posturaCivis ?? 'indiferente';
+        $limites = self::LIMITES[$postura] ?? self::LIMITES['indiferente'];
 
-		// Caçada reduz segurança e alerta o distrito onde a facção está
-		$distrito = $this->distritoRepo->buscarPorId($faccao->posicaoAtual);
-		if ($distrito) {
-			$distrito->seguranca   = max(0, $distrito->seguranca - rand(6, 10));
-			$distrito->economia    = max(0, $distrito->economia - 5);
-			$distrito->nivelAlerta = min(5, $distrito->nivelAlerta + $aumentoAlerta);
-			$this->distritoRepo->atualizar($distrito);
-		}
+        $acao = $this->escolherAcao($faccao, $limites);
+        if ($acao === null) return null;
 
-		return [
-			'tipo'        => 'sobrevivencia',
-			'acao'        => 'caca',
-			'faccao'      => $faccao->nome,
-			'faccao_id'   => $faccao->id,
-			'distrito_id' => $faccao->posicaoAtual,
-			'descricao'   => "{$faccao->nome} cacou no distrito #{$faccao->posicaoAtual}. Fome -{$reducaoFome}. Seguranca -8. Alerta +{$aumentoAlerta}.",
-		];
-	}
+        $id       = bin2hex(random_bytes(8));
+        $duracao  = self::DURACOES[$acao];
+        $distId   = ($acao === 'recrutar') ? 0 : (int) $faccao->posicaoAtual;
 
-	private function contrabandear(Faccao $faccao): array {
-		$ganhoSuprimentos = rand(15, 30);
-		$perdaSigilo      = rand(5, 15);
+        $this->opGhoulRepo->criar($id, $faccao->id, $acao, $distId, $duracao);
 
-		$faccao->suprimentos = min(100, $faccao->suprimentos + $ganhoSuprimentos);
-		$faccao->sigilo      = max(0, $faccao->sigilo - $perdaSigilo);
-		$this->faccaoRepo->atualizar($faccao);
+        return [
+            'faccao'      => $faccao->nome,
+            'faccao_id'   => $faccao->id,
+            'tipo'        => $acao,
+            'distrito_id' => $distId,
+        ];
+    }
 
-		// Contrabando prejudica economia do distrito
-		$distrito = $this->distritoRepo->buscarPorId($faccao->posicaoAtual);
-		if ($distrito) {
-			$distrito->economia = max(0, $distrito->economia - 10);
-			$this->distritoRepo->atualizar($distrito);
-		}
+    /**
+     * Resolve todas as operações ghoul cujo prazo já venceu.
+     * Retorna array de resultados compatíveis com ClarimToquio::publicarEventosTick().
+     */
+    public function resolverConcluidas(): array {
+        $prontas    = $this->opGhoulRepo->listarProntasParaConcluir();
+        $resultados = [];
 
-		return [
-			'tipo'        => 'sobrevivencia',
-			'acao'        => 'contrabando',
-			'faccao'      => $faccao->nome,
-			'faccao_id'   => $faccao->id,
-			'distrito_id' => $faccao->posicaoAtual,
-			'descricao'   => "{$faccao->nome} fez contrabando. Suprimentos +{$ganhoSuprimentos}, Sigilo -{$perdaSigilo}, Economia local -10.",
-		];
-	}
+        foreach ($prontas as $op) {
+            // Já interceptada: efeitos cancelados, apenas fecha
+            if ($op['interceptada']) {
+                $this->opGhoulRepo->marcarConcluida($op['id'], 'interceptada');
+                continue;
+            }
 
-	private function recrutar(Faccao $faccao): array {
-		$ganhoPoder  = rand(5, 15);
-		$perdaSigilo = rand(8, 20);
-		$aumentoFome = rand(3, 8);
+            $faccao = $this->faccaoRepo->buscarPorId($op['faccao_id']);
+            if (!$faccao) {
+                $this->opGhoulRepo->marcarConcluida($op['id'], 'faccao_nao_encontrada');
+                continue;
+            }
 
-		$faccao->poderMilitar = min(100, $faccao->poderMilitar + $ganhoPoder);
-		$faccao->sigilo       = max(0, $faccao->sigilo - $perdaSigilo);
-		$faccao->fome         = min(100, $faccao->fome + $aumentoFome);
-		$this->faccaoRepo->atualizar($faccao);
+            $resultado = match ($op['tipo']) {
+                'alimentar'     => $this->resolverAlimentar($faccao, (int) $op['distrito_id']),
+                'cacar'         => $this->resolverCacar($faccao, (int) $op['distrito_id']),
+                'contrabandear' => $this->resolverContrabandear($faccao, (int) $op['distrito_id']),
+                'recrutar'      => $this->resolverRecruta($faccao),
+                default         => null,
+            };
 
-		return [
-			'tipo'        => 'sobrevivencia',
-			'acao'        => 'recrutamento',
-			'faccao'      => $faccao->nome,
-			'faccao_id'   => $faccao->id,
-			'distrito_id' => null,
-			'descricao'   => "{$faccao->nome} recrutou membros. Poder +{$ganhoPoder}, Sigilo -{$perdaSigilo}, Fome +{$aumentoFome}.",
-		];
-	}
+            if ($resultado) {
+                $this->opGhoulRepo->marcarConcluida($op['id'], $resultado['descricao']);
+                $resultados[] = $resultado;
+            }
+        }
+
+        return $resultados;
+    }
+
+    // ── Escolha de ação ───────────────────────────────────────────────────────
+
+    private function escolherAcao(Faccao $faccao, array $limites): ?string {
+        // Remove tipos esgotados na semana
+        $disponiveis = array_filter(
+            $limites,
+            fn($limite, $tipo) => $this->opGhoulRepo->contarSemana($faccao->id, $tipo) < $limite,
+            ARRAY_FILTER_USE_BOTH
+        );
+        if (empty($disponiveis)) return null;
+
+        // Pesos por estado da facção
+        $pesos = [];
+        if (isset($disponiveis['alimentar']))
+            $pesos['alimentar']     = (int) ($faccao->fome * 0.5);
+        if (isset($disponiveis['cacar']))
+            $pesos['cacar']         = (int) ($faccao->fome * 1.5);
+        if (isset($disponiveis['contrabandear']))
+            $pesos['contrabandear'] = max(1, 100 - $faccao->suprimentos);
+        if (isset($disponiveis['recrutar']))
+            $pesos['recrutar']      = max(1, 100 - $faccao->poderMilitar);
+
+        if (empty($pesos)) return null;
+
+        $total = array_sum($pesos);
+        $roll  = rand(1, $total);
+        $acum  = 0;
+        foreach ($pesos as $acao => $peso) {
+            $acum += $peso;
+            if ($roll <= $acum) return $acao;
+        }
+        return array_key_first($pesos);
+    }
+
+    // ── Resolução por tipo ────────────────────────────────────────────────────
+
+    private function resolverAlimentar(Faccao $faccao, int $distritoId): array {
+        $reducaoFome = rand(10, 15);
+        $faccao->fome = max(0, $faccao->fome - $reducaoFome);
+        $this->faccaoRepo->atualizar($faccao);
+
+        $distrito = $this->distritoRepo->buscarPorId($distritoId);
+        if ($distrito) {
+            $distrito->seguranca = max(0, $distrito->seguranca - rand(2, 4));
+            $this->distritoRepo->atualizar($distrito);
+        }
+
+        return [
+            'tipo'        => 'sobrevivencia',
+            'acao'        => 'alimentar',
+            'faccao'      => $faccao->nome,
+            'faccao_id'   => $faccao->id,
+            'distrito_id' => $distritoId,
+            'descricao'   => "{$faccao->nome} se alimentou discretamente em #{$distritoId}. Fome -{$reducaoFome}.",
+        ];
+    }
+
+    private function resolverCacar(Faccao $faccao, int $distritoId): array {
+        $reducaoFome   = rand(20, 30);
+        $aumentoAlerta = rand(1, 3);
+
+        $faccao->fome          = max(0, $faccao->fome - $reducaoFome);
+        $faccao->agressividade = min(100, $faccao->agressividade + 2);
+        $this->faccaoRepo->atualizar($faccao);
+
+        $distrito = $this->distritoRepo->buscarPorId($distritoId);
+        if ($distrito) {
+            $distrito->seguranca   = max(0, $distrito->seguranca - rand(6, 10));
+            $distrito->economia    = max(0, $distrito->economia - 5);
+            $distrito->nivelAlerta = min(5, $distrito->nivelAlerta + $aumentoAlerta);
+            $this->distritoRepo->atualizar($distrito);
+        }
+
+        return [
+            'tipo'        => 'sobrevivencia',
+            'acao'        => 'caca',
+            'faccao'      => $faccao->nome,
+            'faccao_id'   => $faccao->id,
+            'distrito_id' => $distritoId,
+            'descricao'   => "{$faccao->nome} cacou em #{$distritoId}. Fome -{$reducaoFome}. Seguranca -8. Alerta +{$aumentoAlerta}.",
+        ];
+    }
+
+    private function resolverContrabandear(Faccao $faccao, int $distritoId): array {
+        $ganho       = rand(15, 30);
+        $perdaSigilo = rand(5, 15);
+
+        $faccao->suprimentos = min(100, $faccao->suprimentos + $ganho);
+        $faccao->sigilo      = max(0, $faccao->sigilo - $perdaSigilo);
+        $this->faccaoRepo->atualizar($faccao);
+
+        $distrito = $this->distritoRepo->buscarPorId($distritoId);
+        if ($distrito) {
+            $distrito->economia = max(0, $distrito->economia - 10);
+            $this->distritoRepo->atualizar($distrito);
+        }
+
+        return [
+            'tipo'        => 'sobrevivencia',
+            'acao'        => 'contrabando',
+            'faccao'      => $faccao->nome,
+            'faccao_id'   => $faccao->id,
+            'distrito_id' => $distritoId,
+            'descricao'   => "{$faccao->nome} contrabandeou em #{$distritoId}. Suprimentos +{$ganho}, Sigilo -{$perdaSigilo}.",
+        ];
+    }
+
+    private function resolverRecruta(Faccao $faccao): array {
+        $ganhoPoder  = rand(5, 15);
+        $perdaSigilo = rand(8, 20);
+        $aumentoFome = rand(3, 8);
+
+        $faccao->poderMilitar = min(100, $faccao->poderMilitar + $ganhoPoder);
+        $faccao->sigilo       = max(0, $faccao->sigilo - $perdaSigilo);
+        $faccao->fome         = min(100, $faccao->fome + $aumentoFome);
+        $this->faccaoRepo->atualizar($faccao);
+
+        return [
+            'tipo'        => 'sobrevivencia',
+            'acao'        => 'recrutamento',
+            'faccao'      => $faccao->nome,
+            'faccao_id'   => $faccao->id,
+            'distrito_id' => null,
+            'descricao'   => "{$faccao->nome} recrutou membros. Poder +{$ganhoPoder}, Sigilo -{$perdaSigilo}, Fome +{$aumentoFome}.",
+        ];
+    }
 }
