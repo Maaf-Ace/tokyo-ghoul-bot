@@ -19,9 +19,30 @@ class SistemaMovimento {
 		$this->adjacenciaRepo = $adjacenciaRepo ?? new AdjacenciaRepository();
 	}
 
+	private const COOLDOWN_HORAS = 12;
+
+	// ─── Cooldown de movimento ────────────────────────────────────────────────
+
+	/** Retorna mensagem de erro se o cooldown ainda está ativo, ou null se pode mover. */
+	private function verificarCooldown(string $faccaoId): ?string {
+		$ultimo = $this->movimentoRepo->ultimoMovimento($faccaoId);
+		if (!$ultimo) return null;
+
+		$passou  = time() - strtotime($ultimo['data_movimento']);
+		$restante = self::COOLDOWN_HORAS * 3600 - $passou;
+		if ($restante <= 0) return null;
+
+		$h = floor($restante / 3600);
+		$m = floor(($restante % 3600) / 60);
+		return "Cooldown de movimento ativo: {$h}h {$m}min restantes.";
+	}
+
 	// ─── Movimento manual da CCG ──────────────────────────────────────────────
 
-	public function moverCCG(int $distritoDestino): array {
+	/**
+	 * @param bool $bypass  Se true, ignora o cooldown de 12h (usado pelo !mover_teste).
+	 */
+	public function moverCCG(int $distritoDestino, bool $bypass = false): array {
 		$ccg = $this->faccaoRepo->buscarPorId('ccg');
 		if (!$ccg) return ['ok' => false, 'mensagem' => 'Faccao CCG nao encontrada.'];
 
@@ -36,14 +57,20 @@ class SistemaMovimento {
 			];
 		}
 
+		if (!$bypass) {
+			$cooldown = $this->verificarCooldown('ccg');
+			if ($cooldown) return ['ok' => false, 'mensagem' => $cooldown];
+		}
+
 		$origem = $ccg->posicaoAtual;
 		$ccg->posicaoAtual = $distritoDestino;
 		$this->faccaoRepo->atualizar($ccg);
-		$this->movimentoRepo->registrar('ccg', $origem, $distritoDestino, 'manual');
+		$this->movimentoRepo->registrar('ccg', $origem, $distritoDestino, $bypass ? 'manual_teste' : 'manual');
 
 		return [
 			'ok'       => true,
-			'mensagem' => "CCG deslocou-se do distrito #{$origem} ({$this->nomDistrito($origem)}) para #{$distritoDestino} ({$distrito->nome}).",
+			'mensagem' => "CCG deslocou-se do distrito #{$origem} ({$this->nomDistrito($origem)}) para #{$distritoDestino} ({$distrito->nome})."
+			           . ($bypass ? ' [sem cooldown — modo teste]' : ''),
 		];
 	}
 
@@ -59,6 +86,9 @@ class SistemaMovimento {
 	}
 
 	private function decidirMovimento(Faccao $faccao): ?array {
+		// Cooldown de 12h entre movimentos de IA
+		if ($this->verificarCooldown($faccao->id) !== null) return null;
+
 		if (rand(1, 100) <= 60) return null; // 60% de chance de ficar parado
 
 		$adjacentes = $this->adjacenciaRepo->getAdjacentes($faccao->posicaoAtual);

@@ -318,12 +318,21 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
-        // ── !mover <id> — Desloca o boneco CCG ────────────────────────────────
+        // ── !mover <id> — Desloca o boneco CCG (cooldown 12h) ────────────────
         if (preg_match('/^!mover\s+(\d+)$/i', $content, $m)) {
             $destino = (int) $m[1];
             $sm      = new SistemaMovimento();
             $result  = $sm->moverCCG($destino);
             $message->reply($result['mensagem']);
+            return;
+        }
+
+        // ── !mover_teste <id> — Desloca sem cooldown (Admin) ─────────────────
+        if (preg_match('/^!mover_teste\s+(\d+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $destino = (int) $m[1];
+            $sm      = new SistemaMovimento();
+            $result  = $sm->moverCCG($destino, true);
+            $message->reply('[TESTE] ' . $result['mensagem']);
             return;
         }
 
