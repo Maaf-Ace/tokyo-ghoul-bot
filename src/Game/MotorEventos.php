@@ -198,7 +198,7 @@ class MotorEventos {
 		}
 
 		$taticaAtacante = $this->escolherTatica($atacante);
-		$confrontoId    = uniqid('cnf_');
+		$confrontoId    = 'cnf' . bin2hex(random_bytes(6)); // sem underscore para não quebrar regex
 		$expiraEm       = date('Y-m-d H:i:s', strtotime('+10 minutes'));
 		$distritoId     = $ccg->posicaoAtual;
 

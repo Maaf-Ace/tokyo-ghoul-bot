@@ -858,7 +858,7 @@ $discord->on('init', function (Discord $discord) {
             $atacante    = $faccoesGhoul[array_rand($faccoesGhoul)];
             $taticas     = ['emboscada', 'rush', 'defesa'];
             $taticaAtc   = $taticas[array_rand($taticas)];
-            $confrontoId = 'teste_' . bin2hex(random_bytes(6));
+            $confrontoId = 'tst' . bin2hex(random_bytes(6)); // sem underscore para não quebrar regex
 
             $botToken   = Env::get('DISCORD_TOKEN', '');
             $opsChannel = Env::get('DISCORD_OPS_CHANNEL_ID', '');
@@ -979,7 +979,7 @@ $discord->on('init', function (Discord $discord) {
         };
 
         // ── Tática de combate: tatica_{confrontoId}_{emboscada|rush|defesa} ──
-        if (preg_match('/^tatica_([^_]+)_(emboscada|rush|defesa)$/', $customId, $m)) {
+        if (preg_match('/^tatica_(.+)_(emboscada|rush|defesa)$/', $customId, $m)) {
             [, $confrontoId, $taticaEscolhida] = $m;
 
             if (!$verificarRole()) {
