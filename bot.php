@@ -42,7 +42,16 @@ const LIMITE_ABASTECIMENTOS = 1;
  * Isso evita o problema de bloqueio do loop ReactPHP com chamadas PDO.
  */
 function respondToInteraction($interaction, string $content, bool $ephemeral = false): void {
-    $url     = "https://discord.com/api/v10/interactions/{$interaction->id}/{$interaction->token}/callback";
+    $id    = $interaction->id    ?? '';
+    $token = $interaction->token ?? '';
+    echo "[INTERACTION RESPOND] id={$id} ephemeral=" . ($ephemeral ? 'true' : 'false') . "\n";
+
+    if (empty($id) || empty($token)) {
+        echo "[INTERACTION RESPOND] ERRO: id ou token vazios!\n";
+        return;
+    }
+
+    $url     = "https://discord.com/api/v10/interactions/{$id}/{$token}/callback";
     $flags   = $ephemeral ? 64 : 0;
     $payload = json_encode(
         ['type' => 4, 'data' => ['content' => $content, 'flags' => $flags]],
@@ -57,7 +66,8 @@ function respondToInteraction($interaction, string $content, bool $ephemeral = f
             'timeout'       => 5,
         ],
     ]);
-    @file_get_contents($url, false, $ctx);
+    $resp = @file_get_contents($url, false, $ctx);
+    echo "[INTERACTION RESPOND] resp=" . ($resp !== false ? substr($resp, 0, 200) : 'FALHA/TIMEOUT') . "\n";
 }
 
 function barra(int $valor, int $max = 100): string {
@@ -940,10 +950,12 @@ $discord->on('init', function (Discord $discord) {
     // ── Botões de tática de combate e interceptação ────────────────────────────
     $discord->on(Event::INTERACTION_CREATE, function ($interaction, Discord $discord) {
 
-        // Somente MESSAGE_COMPONENT (cliques em botoes) = tipo 3
-        if ((int) $interaction->type !== 3) return;
+        $typeRaw  = $interaction->type ?? 'null';
+        $customId = $interaction->data?->custom_id ?? '';
+        echo "[INTERACTION] type={$typeRaw} customId={$customId}\n";
 
-        $customId = $interaction->data->custom_id ?? '';
+        // Somente MESSAGE_COMPONENT (cliques em botoes) = tipo 3
+        if ((int) $typeRaw !== 3) return;
         if (empty($customId)) return;
 
         try {
