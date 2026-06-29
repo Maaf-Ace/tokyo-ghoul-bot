@@ -285,13 +285,16 @@ $discord->on('init', function (Discord $discord) {
             if ($parte !== '') $partes[] = $parte;
 
             // Envia partes — a primeira leva a imagem do mapa se existir
-            $imagePath = __DIR__ . '/assets/mapa_tokyo.jpg';
+            $imagePath = file_exists(__DIR__ . '/assets/mapa_tokyo.png')
+                ? __DIR__ . '/assets/mapa_tokyo.png'
+                : __DIR__ . '/assets/mapa_tokyo.jpg';
+            $imageFile = basename($imagePath);
             foreach ($partes as $i => $p) {
                 if ($i === 0) {
                     if (file_exists($imagePath)) {
                         $builder = \Discord\Builders\MessageBuilder::new()
                             ->setContent($p)
-                            ->addFileFromPath('mapa_tokyo.jpg', $imagePath);
+                            ->addFileFromPath($imageFile, $imagePath);
                         $message->reply($builder);
                     } else {
                         $message->reply($p);
