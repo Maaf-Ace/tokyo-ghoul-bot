@@ -294,7 +294,7 @@ $discord->on('init', function (Discord $discord) {
                     if (file_exists($imagePath)) {
                         $builder = \Discord\Builders\MessageBuilder::new()
                             ->setContent($p)
-                            ->addFileFromPath($imageFile, $imagePath);
+                            ->addFile($imagePath, $imageFile);
                         $message->reply($builder);
                     } else {
                         $message->reply($p);
