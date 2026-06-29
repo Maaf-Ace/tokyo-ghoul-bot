@@ -324,13 +324,23 @@ $discord->on('init', function (Discord $discord) {
             }
             $ferido = $ccg->agentesFeridados() ? "\nAgentes feridos ate: {$ccg->agentesFeridosAte} (max 1 op simultanea)" : '';
 
-            $message->reply(
-                "**Posicao CCG**\n"
-              . "Atual: #{$ccg->posicaoAtual} {$nome}\n"
-              . "Base:  #{$ccg->distritoBase}\n"
-              . "Adjacentes (alcance de operacao): " . implode(', ', $adjNomes)
-              . $ferido
-            );
+            $texto = "**Posicao CCG**\n"
+                   . "Atual: #{$ccg->posicaoAtual} {$nome}\n"
+                   . "Base:  #{$ccg->distritoBase}\n"
+                   . "Adjacentes (alcance de operacao): " . implode(', ', $adjNomes)
+                   . $ferido;
+
+            $imagePath = file_exists(__DIR__ . '/assets/mapa_tokyo.png')
+                ? __DIR__ . '/assets/mapa_tokyo.png'
+                : __DIR__ . '/assets/mapa_tokyo.jpg';
+            if (file_exists($imagePath)) {
+                $builder = \Discord\Builders\MessageBuilder::new()
+                    ->setContent($texto)
+                    ->addFile($imagePath, basename($imagePath));
+                $message->reply($builder);
+            } else {
+                $message->reply($texto);
+            }
             return;
         }
 
@@ -948,7 +958,7 @@ $discord->on('init', function (Discord $discord) {
         }
 
         // ── !adm — Lista todos os comandos de admin ───────────────────────────
-        if (strtolower($content) === '!adm' && $authorId === '242459562655875073') {
+        if (in_array(strtolower($content), ['!adm', '!comandos_adm']) && $authorId === '242459562655875073') {
             $message->reply(
                 "**[PAINEL GM — Comandos Admin]**\n\n"
               . "**Facções**\n"
