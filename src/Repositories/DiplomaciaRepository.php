@@ -108,6 +108,20 @@ class HistoricoCombateRepository {
 	 * contagem de quantas vezes a facção usou cada tática recentemente.
 	 * Usado para alimentar o parâmetro $memoriaInimigo de escolherTatica().
 	 */
+	/** Retorna as últimas N táticas usadas pela facção como ATACANTE (para exibir no alerta de confronto). */
+	public function getUltimasTaticasAtacante(string $faccaoId, int $limite = 5): array {
+		$stmt = $this->db->prepare(
+			"SELECT tatica_atacante, data_combate
+			 FROM historico_combates
+			 WHERE atacante_id = :id
+			 ORDER BY data_combate DESC LIMIT :limite"
+		);
+		$stmt->bindValue('id', $faccaoId);
+		$stmt->bindValue('limite', $limite, PDO::PARAM_INT);
+		$stmt->execute();
+		return $stmt->fetchAll(PDO::FETCH_ASSOC);
+	}
+
 	public function getMemoriaTaticaDaFaccao(string $faccaoId, int $ultimosNCombates = 5): array {
 		$stmt = $this->db->prepare(
 			"SELECT tatica_atacante, tatica_defensor, atacante_id, defensor_id

@@ -1011,10 +1011,12 @@ $discord->on('init', function (Discord $discord) {
             $taticaAtc   = $taticas[array_rand($taticas)];
             $confrontoId = 'tst' . bin2hex(random_bytes(6)); // sem underscore para não quebrar regex
 
-            $botToken   = Env::get('DISCORD_TOKEN', '');
-            $opsChannel = Env::get('DISCORD_OPS_CHANNEL_ID', '');
-            $clarim     = new ClarimToquio('', '', $botToken, $opsChannel);
-            $msgId      = $clarim->publicarAlertaConfronto($confrontoId, $atacante, (int) $ccg->posicaoAtual, $taticaAtc);
+            $botToken        = Env::get('DISCORD_TOKEN', '');
+            $opsChannel      = Env::get('DISCORD_OPS_CHANNEL_ID', '');
+            $clarim          = new ClarimToquio('', '', $botToken, $opsChannel);
+            $historicoRepo   = new HistoricoCombateRepository();
+            $historicoTaticas = $historicoRepo->getUltimasTaticasAtacante($atacante->id, 5);
+            $msgId           = $clarim->publicarAlertaConfronto($confrontoId, $atacante, (int) $ccg->posicaoAtual, $historicoTaticas);
 
             if ($msgId) {
                 $cpRepo = new ConfruntoPendenteRepository();
@@ -1112,12 +1114,12 @@ $discord->on('init', function (Discord $discord) {
 
             if ($atacante && $ccg) {
                 if ($vencedorId === 'ccg') {
-                    $atacante->poderMilitar = max(0, $atacante->poderMilitar - 15);
-                    $ccg->poderMilitar      = max(0, $ccg->poderMilitar - 5);
+                    $atacante->poderMilitar = max(0, $atacante->poderMilitar - 8);
+                    $ccg->poderMilitar      = max(0, $ccg->poderMilitar - 3);
                 } else {
-                    $ccg->poderMilitar        = max(0, $ccg->poderMilitar - 15);
-                    $atacante->poderMilitar   = max(0, $atacante->poderMilitar - 5);
-                    $atacante->suprimentos    = min(100, $atacante->suprimentos + 10);
+                    $ccg->poderMilitar      = max(0, $ccg->poderMilitar - 8);
+                    $atacante->poderMilitar = max(0, $atacante->poderMilitar - 3);
+                    $atacante->suprimentos  = min(100, $atacante->suprimentos + 10);
                 }
                 $faccaoRepo->atualizar($atacante);
                 $faccaoRepo->atualizar($ccg);

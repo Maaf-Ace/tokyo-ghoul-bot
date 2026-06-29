@@ -116,16 +116,28 @@ class ClarimToquio {
      * Posta alerta de confronto com botões de táticas no canal de ops via REST.
      * Retorna o message_id ou null se falhar.
      */
-    public function publicarAlertaConfronto(string $confrontoId, Faccao $atacante, int $distritoId, string $taticaAtacante): ?string {
+    /**
+     * @param array $historicoTaticas Últimas táticas do atacante como atacante (NÃO revela a atual).
+     */
+    public function publicarAlertaConfronto(string $confrontoId, Faccao $atacante, int $distritoId, array $historicoTaticas): ?string {
         if (empty($this->botToken) || empty($this->opsChannelId)) return null;
 
         $trad = ['emboscada' => 'Emboscada', 'rush' => 'Rush', 'defesa' => 'Defesa'];
-        $tAtc = $trad[$taticaAtacante] ?? ucfirst($taticaAtacante);
+
+        if (empty($historicoTaticas)) {
+            $histStr = '_Sem histórico registrado_';
+        } else {
+            $items = array_map(
+                fn($h) => $trad[$h['tatica_atacante']] ?? ucfirst($h['tatica_atacante']),
+                $historicoTaticas
+            );
+            $histStr = implode(' → ', $items) . ' _(mais recente por último)_';
+        }
 
         $payload = json_encode([
             'content'    => "**[ALERTA DE CONFRONTO — TOKYO-GO]**\n"
                           . "**{$atacante->nome}** avança contra a CCG no **Distrito #{$distritoId}**!\n"
-                          . "Tática inimiga detectada: **{$tAtc}**\n"
+                          . "Últimas táticas registradas como atacante: {$histStr}\n"
                           . "**Divisão Alfa** — Escolha sua tática nos próximos 10 minutos!\n"
                           . "> Se nenhuma resposta for dada, a CCG combaterá automaticamente.",
             'components' => [[

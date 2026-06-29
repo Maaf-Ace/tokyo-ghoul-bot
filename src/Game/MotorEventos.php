@@ -111,18 +111,17 @@ class MotorEventos {
 
 		if ($atacanteVenceu) {
 			$resultado = 'Vitória do Atacante';
-			$defensor->poderMilitar = max(0, $defensor->poderMilitar - 15);
-			$atacante->poderMilitar = max(0, $atacante->poderMilitar - 5);
+			$defensor->poderMilitar = max(0, $defensor->poderMilitar - 8);
+			$atacante->poderMilitar = max(0, $atacante->poderMilitar - 3);
 			$atacante->suprimentos  = min(100, $atacante->suprimentos + 10);
 			if ($derrotaSinistra) {
-				// Perda extra de suprimentos do perdedor
-				$defensor->suprimentos = max(0, $defensor->suprimentos - rand(10, 20));
+				$defensor->suprimentos = max(0, $defensor->suprimentos - rand(8, 15));
 			}
 			$vencedor = $atacante;
 			$perdedor = $defensor;
 		} else {
 			$resultado = 'Vitória do Defensor';
-			$atacante->poderMilitar = max(0, $atacante->poderMilitar - 15);
+			$atacante->poderMilitar = max(0, $atacante->poderMilitar - 8);
 			$vencedor = $defensor;
 			$perdedor = $atacante;
 		}
@@ -197,12 +196,13 @@ class MotorEventos {
 			return [];
 		}
 
-		$taticaAtacante = $this->escolherTatica($atacante);
-		$confrontoId    = 'cnf' . bin2hex(random_bytes(6)); // sem underscore para não quebrar regex
-		$expiraEm       = date('Y-m-d H:i:s', strtotime('+10 minutes'));
-		$distritoId     = $ccg->posicaoAtual;
+		$taticaAtacante   = $this->escolherTatica($atacante);
+		$confrontoId      = 'cnf' . bin2hex(random_bytes(6));
+		$expiraEm         = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+		$distritoId       = $ccg->posicaoAtual;
+		$historicoTaticas = $this->historicoRepo->getUltimasTaticasAtacante($atacante->id, 5);
 
-		$messageId = $this->clarim->publicarAlertaConfronto($confrontoId, $atacante, $distritoId, $taticaAtacante);
+		$messageId = $this->clarim->publicarAlertaConfronto($confrontoId, $atacante, $distritoId, $historicoTaticas);
 		$this->cpRepo->criar($confrontoId, $atacante->id, $distritoId, $taticaAtacante, $messageId ?? '', $expiraEm);
 
 		return [
