@@ -101,35 +101,41 @@ try {
 		}
 	}
 
-	// 8. Detecção de atividades ghoul pela CCG
+	// 8. Detecção de atividades ghoul pela CCG (sigilo vs detetive)
 	$ccg          = $faccaoRepo->buscarPorId('ccg');
 	$conhecimento = (new ConhecimentoCCGRepository())->listarTodos();
-	$adjRepo      = new AdjacenciaRepository();
 	$opGhoulRepo  = new OperacaoGhoulRepository();
 	$opsAtivas    = $opGhoulRepo->listarPendentes();
 
 	foreach ($opsAtivas as $op) {
 		if ($op['alerta_enviado'] || !$op['distrito_id'] || !$ccg) continue;
 		$dist = (int) $op['distrito_id'];
-		if (!$adjRepo->saoAdjacentes((int) $ccg->posicaoAtual, $dist)) continue;
 
-		$nivel = $conhecimento[$dist]['nivel_conhecimento'] ?? 'desconhecido';
-		$chanceDeteccao = match ($nivel) {
-			'basico'  => 20,
-			'bom'     => 35,
-			'critico' => 50,
-			default   => 0,
-		};
-		if ($chanceDeteccao === 0) continue;
+		// Condição 1: CCG está NO MESMO distrito que a operação
+		$emMesmoDistrito = ((int) $ccg->posicaoAtual === $dist);
 
-		if (rand(1, 100) <= $chanceDeteccao) {
-			$fac      = $faccaoRepo->buscarPorId($op['faccao_id']);
+		// Condição 2: CCG tem conhecimento CRÍTICO do distrito (investigação profunda)
+		$nivel              = $conhecimento[$dist]['nivel_conhecimento'] ?? 'desconhecido';
+		$temConhecCritico   = ($nivel === 'critico');
+
+		if (!$emMesmoDistrito && !$temConhecCritico) continue;
+
+		// Rolagem sigilo: Ghoul rola 1d20 + bônus de sigilo (a cada 20 = +1)
+		// CCG rola 1d20 (+4 se estiver no mesmo distrito)
+		$fac         = $faccaoRepo->buscarPorId($op['faccao_id']);
+		$sigiloBonus = $fac ? (int) floor($fac->sigilo / 20) : 0;
+		$rollCCG     = rand(1, 20) + ($emMesmoDistrito ? 4 : 0);
+		$rollGhoul   = rand(1, 20) + $sigiloBonus;
+
+		if ($rollCCG > $rollGhoul) {
 			$nomeDist = $distritoRepo->buscarPorId($dist)?->nome ?? "Distrito #{$dist}";
 			$msgId    = $clarim->publicarAlertaIntercepcao($op['id'], $fac, $nomeDist, $op['tipo']);
 			if ($msgId) {
 				$opGhoulRepo->marcarAlertaEnviado($op['id']);
-				echo "  [DETECCAO] {$op['faccao_id']} em #{$dist} detectada pela CCG.\n";
+				echo "  [DETECCAO] {$op['faccao_id']} em #{$dist}: CCG {$rollCCG} vs Ghoul {$rollGhoul} (sigilo+{$sigiloBonus}).\n";
 			}
+		} else {
+			echo "  [FURTIVIDADE] {$op['faccao_id']} em #{$dist} nao detectado: Ghoul {$rollGhoul} (sigilo+{$sigiloBonus}) vs CCG {$rollCCG}.\n";
 		}
 	}
 

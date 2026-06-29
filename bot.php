@@ -270,22 +270,35 @@ $discord->on('init', function (Discord $discord) {
                 $linhas[] = $linha;
             }
 
-            // Envia em partes para nao ultrapassar 2000 chars
-            $parte    = '';
-            $primeiro = true;
+            // Coleta partes para nao ultrapassar 2000 chars
+            $partes = [];
+            $parte  = '';
             foreach ($linhas as $linha) {
                 $candidato = $parte . ($parte ? "\n\n" : '') . $linha;
                 if (strlen($candidato) > 1900) {
-                    if ($primeiro) { $message->reply($parte); $primeiro = false; }
-                    else           { $message->channel->sendMessage($parte); }
+                    if ($parte !== '') $partes[] = $parte;
                     $parte = $linha;
                 } else {
                     $parte = $candidato;
                 }
             }
-            if ($parte !== '') {
-                if ($primeiro) $message->reply($parte);
-                else           $message->channel->sendMessage($parte);
+            if ($parte !== '') $partes[] = $parte;
+
+            // Envia partes — a primeira leva a imagem do mapa se existir
+            $imagePath = __DIR__ . '/assets/mapa_tokyo.jpg';
+            foreach ($partes as $i => $p) {
+                if ($i === 0) {
+                    if (file_exists($imagePath)) {
+                        $builder = \Discord\Builders\MessageBuilder::new()
+                            ->setContent($p)
+                            ->addFileFromPath('mapa_tokyo.jpg', $imagePath);
+                        $message->reply($builder);
+                    } else {
+                        $message->reply($p);
+                    }
+                } else {
+                    $message->channel->sendMessage($p);
+                }
             }
             return;
         }
@@ -338,38 +351,20 @@ $discord->on('init', function (Discord $discord) {
 
         // ── !faccoes ───────────────────────────────────────────────────────────
         if (in_array(strtolower($content), ['!faccoes', '!frentes', '!faccções'])) {
-            $faccoes    = (new FaccaoRepository())->listarTodas();
-            $sf         = new SistemaFinanceiro();
-            $dRepo      = new DistritoRepository();
+            $faccoes = (new FaccaoRepository())->listarTodas();
 
             if (empty($faccoes)) {
                 $message->reply('Nenhuma faccao cadastrada.');
                 return;
             }
 
-            $linhas = ["**STATUS DAS FACCOES**\n"];
+            $linhas = ["**FACCOES DE TOQUIO**\n"];
             foreach ($faccoes as $f) {
-                $tag  = $f->id === 'ccg' ? '[CCG]' : '[GHOUL]';
-                $pos  = $dRepo->buscarPorId($f->posicaoAtual);
-                $posNome = $pos ? "#{$f->posicaoAtual} {$pos->nome}" : "#{$f->posicaoAtual}";
-                $linha = "{$tag} **{$f->nome}**\n"
-                       . "   Poder Mil: `" . barra($f->poderMilitar) . "` {$f->poderMilitar}\n"
-                       . "   Suprimentos: `" . barra($f->suprimentos) . "` {$f->suprimentos} | "
-                       . "Sigilo: `" . barra($f->sigilo) . "` {$f->sigilo}\n"
-                       . "   Agressividade: `" . barra($f->agressividade) . "` {$f->agressividade} | "
-                       . "Fome: `" . barra($f->fome) . "` {$f->fome}\n"
-                       . "   Posicao atual: {$posNome}";
-
-                if ($f->id === 'ccg') {
-                    $linha .= "\n   Orcamento: **Y" . number_format($sf->getOrcamento(), 0, ',', '.') . "**";
-                    if ($f->agentesFeridados()) {
-                        $linha .= "\n   [!] Agentes feridos ate {$f->agentesFeridosAte}";
-                    }
-                }
-                $linhas[] = $linha;
+                $tag    = $f->id === 'ccg' ? '[CCG]' : '[GHOUL]';
+                $linhas[] = "{$tag} **{$f->nome}** — Poder Militar: `" . barra($f->poderMilitar) . "` {$f->poderMilitar}";
             }
 
-            $message->reply(implode("\n\n", $linhas));
+            $message->reply(implode("\n", $linhas));
             return;
         }
 
@@ -947,6 +942,95 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
+        // ── !combates_mesa — Lista confrontos em standby (Admin) ─────────────
+        if (strtolower($content) === '!combates_mesa' && $authorId === '242459562655875073') {
+            $mesaRepo  = new CombateMesaRepository();
+            $pendentes = $mesaRepo->listarPendentes();
+
+            if (empty($pendentes)) {
+                $message->reply("**Combates em Mesa**\nNenhum confronto aguardando resolucao.");
+                return;
+            }
+
+            $dRepo  = new DistritoRepository();
+            $linhas = ["**Combates em Mesa — Aguardando GM**\n"];
+            foreach ($pendentes as $c) {
+                $dist     = $dRepo->buscarPorId((int) $c['distrito_id']);
+                $nomeDist = $dist ? $dist->nome : "Distrito #{$c['distrito_id']}";
+                $data     = date('d/m H:i', strtotime($c['data_criacao']));
+                $linhas[] = "ID: `{$c['confronto_id']}`\n"
+                          . "   Atacante: **{$c['atacante_nome']}** | Tatica: {$c['tatica_atacante']}\n"
+                          . "   Local: {$nomeDist} | Criado: {$data}\n"
+                          . "   Resolver: `!resolver_mesa {$c['confronto_id']} <ccg|id_faccao>`";
+            }
+            $message->reply(implode("\n\n", $linhas));
+            return;
+        }
+
+        // ── !resolver_mesa <id> <vencedor_id> — Resolve confronto em mesa (Admin) ──
+        if (preg_match('/^!resolver_mesa\s+(\S+)\s+(\S+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $confrontoId = $m[1];
+            $vencedorId  = $m[2];
+
+            $mesaRepo  = new CombateMesaRepository();
+            $confronto = $mesaRepo->buscarPorId($confrontoId);
+
+            if (!$confronto || $confronto['status'] !== 'pendente') {
+                $message->reply("Confronto `{$confrontoId}` nao encontrado ou ja resolvido/cancelado.");
+                return;
+            }
+
+            $faccaoRepo = new FaccaoRepository();
+            $vencedor   = $faccaoRepo->buscarPorId($vencedorId);
+            if (!$vencedor) {
+                $message->reply("Faccao `{$vencedorId}` nao encontrada. Use o ID da faccao (ex: ccg, aogiri_tree).");
+                return;
+            }
+
+            $atacante = $faccaoRepo->buscarPorId($confronto['atacante_id']);
+            $ccg      = $faccaoRepo->buscarPorId('ccg');
+
+            if ($atacante && $ccg) {
+                if ($vencedorId === 'ccg') {
+                    $atacante->poderMilitar = max(0, $atacante->poderMilitar - 15);
+                    $ccg->poderMilitar      = max(0, $ccg->poderMilitar - 5);
+                } else {
+                    $ccg->poderMilitar        = max(0, $ccg->poderMilitar - 15);
+                    $atacante->poderMilitar   = max(0, $atacante->poderMilitar - 5);
+                    $atacante->suprimentos    = min(100, $atacante->suprimentos + 10);
+                }
+                $faccaoRepo->atualizar($atacante);
+                $faccaoRepo->atualizar($ccg);
+            }
+
+            $mesaRepo->resolver($confrontoId, $vencedorId);
+
+            $message->reply(
+                "**[GM — Combate em Mesa Resolvido]**\n"
+              . "Confronto `{$confrontoId}` encerrado.\n"
+              . "Vencedor: **{$vencedor->nome}**\n"
+              . "Efeitos de combate aplicados automaticamente."
+            );
+            return;
+        }
+
+        // ── !cancelar_mesa <id> — Cancela confronto em mesa (Admin) ─────────
+        if (preg_match('/^!cancelar_mesa\s+(\S+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $confrontoId = $m[1];
+
+            $mesaRepo  = new CombateMesaRepository();
+            $confronto = $mesaRepo->buscarPorId($confrontoId);
+
+            if (!$confronto || $confronto['status'] !== 'pendente') {
+                $message->reply("Confronto `{$confrontoId}` nao encontrado ou ja resolvido/cancelado.");
+                return;
+            }
+
+            $mesaRepo->cancelar($confrontoId);
+            $message->reply("**[GM]** Confronto `{$confrontoId}` cancelado sem efeitos de combate.");
+            return;
+        }
+
         // ── !ajuda_tokyo / !comandos ───────────────────────────────────────────
         if (in_array(strtolower($content), ['!ajuda_tokyo', '!comandos', '!tokyo_ghoul'])) {
             $message->reply(
@@ -1068,6 +1152,48 @@ $discord->on('init', function (Discord $discord) {
             }
 
             followupInteraction($appId, $token, $msg);
+            return;
+        }
+
+        // ── Combate em Mesa: mesa_{confrontoId} ───────────────────────────
+        if (preg_match('/^mesa_(.+)$/', $customId, $m)) {
+            $confrontoId = $m[1];
+
+            if (!$verificarRole()) {
+                respondToInteraction($interaction, 'Apenas membros da **Divisao Alfa** podem enviar confrontos para a mesa.', true);
+                return;
+            }
+
+            $appId = $discord->application->id ?? '';
+            $token = $interaction->token ?? '';
+            deferInteraction($interaction);
+
+            $cpRepo    = new ConfruntoPendenteRepository();
+            $confronto = $cpRepo->buscarPorId($confrontoId);
+
+            if (!$confronto || $confronto['resolvido']) {
+                followupInteraction($appId, $token, 'Este confronto ja foi resolvido ou nao existe.', true);
+                return;
+            }
+
+            $mesaRepo = new CombateMesaRepository();
+            if ($mesaRepo->buscarPorId($confrontoId)) {
+                followupInteraction($appId, $token, 'Este confronto ja esta em standby na mesa.', true);
+                return;
+            }
+
+            $faccaoRepo = new FaccaoRepository();
+            $atacante   = $faccaoRepo->buscarPorId($confronto['atacante_id']);
+            $nomeFac    = $atacante ? $atacante->nome : $confronto['atacante_id'];
+
+            $mesaRepo->criar($confrontoId, $confronto['atacante_id'], (int) $confronto['distrito_id'], $confronto['tatica_atacante']);
+            $cpRepo->marcarResolvido($confrontoId);
+
+            followupInteraction($appId, $token,
+                "**[COMBATE EM MESA]** O confronto com **{$nomeFac}** entrou em standby.\n"
+              . "O GM sera notificado para conduzir o combate manualmente.\n"
+              . "Use `!combates_mesa` para ver os confrontos aguardando resolucao."
+            );
             return;
         }
 

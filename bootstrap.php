@@ -35,6 +35,7 @@ require_once __DIR__ . '/src/Repositories/QuestDistritoRepository.php';
 require_once __DIR__ . '/src/Repositories/ConfruntoPendenteRepository.php';
 require_once __DIR__ . '/src/Repositories/ConhecimentoCCGRepository.php';
 require_once __DIR__ . '/src/Repositories/OperacaoGhoulRepository.php';
+require_once __DIR__ . '/src/Repositories/CombateMesaRepository.php';
 
 // Game
 require_once __DIR__ . '/src/Game/MotorEventos.php';

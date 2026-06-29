@@ -131,9 +131,10 @@ class ClarimToquio {
             'components' => [[
                 'type'       => 1,
                 'components' => [
-                    ['type' => 2, 'style' => 1, 'label' => 'Emboscada', 'custom_id' => "tatica_{$confrontoId}_emboscada"],
-                    ['type' => 2, 'style' => 4, 'label' => 'Rush',      'custom_id' => "tatica_{$confrontoId}_rush"],
-                    ['type' => 2, 'style' => 2, 'label' => 'Defesa',    'custom_id' => "tatica_{$confrontoId}_defesa"],
+                    ['type' => 2, 'style' => 1, 'label' => 'Emboscada',       'custom_id' => "tatica_{$confrontoId}_emboscada"],
+                    ['type' => 2, 'style' => 4, 'label' => 'Rush',            'custom_id' => "tatica_{$confrontoId}_rush"],
+                    ['type' => 2, 'style' => 2, 'label' => 'Defesa',          'custom_id' => "tatica_{$confrontoId}_defesa"],
+                    ['type' => 2, 'style' => 2, 'label' => 'Combate em Mesa', 'custom_id' => "mesa_{$confrontoId}"],
                 ],
             ]],
         ], JSON_UNESCAPED_UNICODE);

@@ -16,30 +16,33 @@ class RotinasSobrevivencia {
     private DistritoRepository      $distritoRepo;
     private FaccaoRepository        $faccaoRepo;
     private OperacaoGhoulRepository $opGhoulRepo;
+    private AdjacenciaRepository    $adjRepo;
 
-    // Duração em horas por tipo de atividade
+    // Duração em horas — maior = mais chance de interceptação pela CCG
     private const DURACOES = [
-        'alimentar'     => 1.0,
-        'cacar'         => 2.0,
-        'contrabandear' => 2.5,
-        'recrutar'      => 3.0,
+        'alimentar'     => 4.0,
+        'cacar'         => 6.0,
+        'contrabandear' => 6.0,
+        'recrutar'      => 8.0,
     ];
 
-    // Limites semanais por postura_civis
+    // Limites semanais por postura_civis — ajustados para durações maiores
     private const LIMITES = [
-        'predadora'   => ['alimentar' => 1, 'cacar' => 4, 'recrutar' => 2, 'contrabandear' => 2],
-        'indiferente' => ['alimentar' => 2, 'cacar' => 2, 'recrutar' => 2, 'contrabandear' => 3],
-        'protetora'   => ['alimentar' => 4, 'cacar' => 1, 'recrutar' => 2, 'contrabandear' => 1],
+        'predadora'   => ['alimentar' =>  5, 'cacar' => 14, 'recrutar' => 7, 'contrabandear' =>  7],
+        'indiferente' => ['alimentar' => 10, 'cacar' => 10, 'recrutar' => 7, 'contrabandear' => 10],
+        'protetora'   => ['alimentar' => 14, 'cacar' =>  5, 'recrutar' => 7, 'contrabandear' =>  5],
     ];
 
     public function __construct(
         ?DistritoRepository      $distritoRepo = null,
         ?FaccaoRepository        $faccaoRepo   = null,
-        ?OperacaoGhoulRepository $opGhoulRepo  = null
+        ?OperacaoGhoulRepository $opGhoulRepo  = null,
+        ?AdjacenciaRepository    $adjRepo      = null
     ) {
         $this->distritoRepo = $distritoRepo ?? new DistritoRepository();
         $this->faccaoRepo   = $faccaoRepo   ?? new FaccaoRepository();
         $this->opGhoulRepo  = $opGhoulRepo  ?? new OperacaoGhoulRepository();
+        $this->adjRepo      = $adjRepo      ?? new AdjacenciaRepository();
     }
 
     /**
@@ -58,7 +61,7 @@ class RotinasSobrevivencia {
 
         $id       = bin2hex(random_bytes(8));
         $duracao  = self::DURACOES[$acao];
-        $distId   = ($acao === 'recrutar') ? 0 : (int) $faccao->posicaoAtual;
+        $distId   = ($acao === 'recrutar') ? 0 : $this->escolherDistrito($faccao);
 
         $this->opGhoulRepo->criar($id, $faccao->id, $acao, $distId, $duracao);
 
@@ -106,6 +109,14 @@ class RotinasSobrevivencia {
         }
 
         return $resultados;
+    }
+
+    // ── Escolha de distrito (atual ou adjacente) ──────────────────────────────
+
+    private function escolherDistrito(Faccao $faccao): int {
+        $adjacentes = $this->adjRepo->getAdjacentes($faccao->posicaoAtual);
+        $opcoes     = array_merge([(int) $faccao->posicaoAtual], $adjacentes);
+        return (int) $opcoes[array_rand($opcoes)];
     }
 
     // ── Escolha de ação ───────────────────────────────────────────────────────

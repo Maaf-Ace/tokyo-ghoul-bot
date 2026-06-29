@@ -19,7 +19,8 @@ class SistemaMovimento {
 		$this->adjacenciaRepo = $adjacenciaRepo ?? new AdjacenciaRepository();
 	}
 
-	private const COOLDOWN_HORAS = 12;
+	private const COOLDOWN_CCG_HORAS   = 8;
+	private const COOLDOWN_GHOUL_HORAS = 12;
 
 	// ─── Cooldown de movimento ────────────────────────────────────────────────
 
@@ -28,8 +29,9 @@ class SistemaMovimento {
 		$ultimo = $this->movimentoRepo->ultimoMovimento($faccaoId);
 		if (!$ultimo) return null;
 
-		$passou  = time() - strtotime($ultimo['data_movimento']);
-		$restante = self::COOLDOWN_HORAS * 3600 - $passou;
+		$cooldownHoras = ($faccaoId === 'ccg') ? self::COOLDOWN_CCG_HORAS : self::COOLDOWN_GHOUL_HORAS;
+		$passou        = time() - strtotime($ultimo['data_movimento']);
+		$restante      = $cooldownHoras * 3600 - $passou;
 		if ($restante <= 0) return null;
 
 		$h = floor($restante / 3600);

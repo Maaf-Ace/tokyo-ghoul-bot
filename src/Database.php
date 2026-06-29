@@ -11,6 +11,14 @@ class Database {
 
 	public static function getConnection(): PDO {
 		if (self::$instancia !== null) {
+			try {
+				self::$instancia->query('SELECT 1');
+			} catch (PDOException) {
+				self::$instancia = null;
+			}
+		}
+
+		if (self::$instancia !== null) {
 			return self::$instancia;
 		}
 
