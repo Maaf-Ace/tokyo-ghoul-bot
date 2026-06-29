@@ -821,36 +821,156 @@ $discord->on('init', function (Discord $discord) {
             return;
         }
 
-        // ── !concluir_quest <distrito_id> <quest_id> — Admin ─────────────────
-        if (preg_match('/^!concluir_quest\s+(\d+)\s+(\d+)$/i', $content, $m) && $authorId === '242459562655875073') {
-            $distritoId = (int) $m[1];
-            $questId    = (int) $m[2];
-            $questRepo  = new QuestDistritoRepository();
-            $dRepo      = new DistritoRepository();
 
-            $quest    = $questRepo->buscarPorId($questId);
-            $distrito = $dRepo->buscarPorId($distritoId);
+        // ══════════════════════════════════════════════════════════════════════
+        // PAINEL DE ADMIN — comandos sem ir no banco
+        // ══════════════════════════════════════════════════════════════════════
 
-            if (!$quest || (int) $quest['distrito_id'] !== $distritoId) {
-                $message->reply("Quest #{$questId} nao encontrada no distrito #{$distritoId}.");
+        // ── !set_faccao <id> <stat> <valor> ───────────────────────────────────
+        if (preg_match('/^!set_faccao\s+(\S+)\s+(\S+)\s+(\S+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $faccaoId = strtolower($m[1]);
+            $stat     = strtolower($m[2]);
+            $valor    = $m[3];
+
+            $fRepo  = new FaccaoRepository();
+            $faccao = $fRepo->buscarPorId($faccaoId);
+            if (!$faccao) {
+                $message->reply("Faccao `{$faccaoId}` nao encontrada.");
                 return;
             }
 
-            $questRepo->concluir($questId, 'ccg');
-            $distritoAtualizado = $dRepo->buscarPorId($distritoId);
-            $conquistavel       = $questRepo->verificarConquista($distritoId, 'ccg', $distritoAtualizado ? $distritoAtualizado->satisfacaoGeral : 0);
+            $statsNumericos = ['fome', 'poder', 'suprimentos', 'sigilo', 'agressividade'];
+            if (in_array($stat, $statsNumericos)) {
+                $n = max(0, min(100, (int) $valor));
+                match ($stat) {
+                    'fome'         => $faccao->fome         = $n,
+                    'poder'        => $faccao->poderMilitar = $n,
+                    'suprimentos'  => $faccao->suprimentos  = $n,
+                    'sigilo'       => $faccao->sigilo        = $n,
+                    'agressividade'=> $faccao->agressividade = $n,
+                    default        => null,
+                };
+                $fRepo->atualizar($faccao);
+                $message->reply("**[GM]** `{$faccao->nome}` — {$stat} definido para **{$n}**.");
+            } elseif ($stat === 'postura') {
+                $posturas = ['predadora', 'indiferente', 'protetora'];
+                if (!in_array($valor, $posturas)) {
+                    $message->reply("Postura invalida. Use: " . implode(', ', $posturas));
+                    return;
+                }
+                $faccao->posturaCivis = $valor;
+                $fRepo->atualizar($faccao);
+                $message->reply("**[GM]** `{$faccao->nome}` — postura definida para **{$valor}**.");
+            } else {
+                $message->reply("Stat invalido. Use: fome, poder, suprimentos, sigilo, agressividade, postura");
+            }
+            return;
+        }
 
-            $msg = "**[GM]** Quest **{$quest['titulo']}** marcada como concluida em **" . ($distrito ? $distrito->nome : "#{$distritoId}") . "**.\n"
-                 . "Tipo: {$quest['tipo']}";
+        // ── !set_distrito <id> <stat> <valor> ────────────────────────────────
+        if (preg_match('/^!set_distrito\s+(\d+)\s+(\S+)\s+(\S+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $distritoId = (int) $m[1];
+            $stat       = strtolower($m[2]);
+            $valor      = $m[3];
 
-            if ($conquistavel) {
-                $dRepo->conquistar($distritoId, 'ccg');
-                $questRepo->seedParaDistrito($distritoId);
-                $msg .= "\n\n**CONQUISTA!** Satisfacao {$distritoAtualizado->satisfacaoGeral}% >= 80 e quests cumpridas."
-                      . "\nCCG agora domina **" . ($distrito ? $distrito->nome : "#{$distritoId}") . "**. Novas quests geradas.";
+            $dRepo   = new DistritoRepository();
+            $distrito = $dRepo->buscarPorId($distritoId);
+            if (!$distrito) {
+                $message->reply("Distrito #{$distritoId} nao encontrado.");
+                return;
             }
 
-            $message->reply($msg);
+            $antigo = null;
+            switch ($stat) {
+                case 'seguranca':
+                    $antigo = $distrito->seguranca;
+                    $distrito->seguranca = max(0, min(100, (int) $valor));
+                    break;
+                case 'economia':
+                    $antigo = $distrito->economia;
+                    $distrito->economia = max(0, min(100, (int) $valor));
+                    break;
+                case 'suprimentos':
+                    $antigo = $distrito->suprimentosPop;
+                    $distrito->suprimentosPop = max(0, min(100, (int) $valor));
+                    break;
+                case 'alerta':
+                    $antigo = $distrito->nivelAlerta;
+                    $distrito->nivelAlerta = max(0, min(5, (int) $valor));
+                    break;
+                case 'dominacao':
+                    $antigo = $distrito->nivelDominacao;
+                    $distrito->nivelDominacao = max(0, min(100, (int) $valor));
+                    break;
+                default:
+                    $message->reply("Stat invalido. Use: seguranca, economia, suprimentos, alerta, dominacao");
+                    return;
+            }
+
+            $dRepo->atualizar($distrito);
+            $message->reply("**[GM]** **{$distrito->nome}** (#{$distritoId}) — {$stat}: {$antigo} → **" . $m[3] . "**");
+            return;
+        }
+
+        // ── !dominar <distrito_id> <faccao_id> ───────────────────────────────
+        if (preg_match('/^!dominar\s+(\d+)\s+(\S+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $distritoId = (int) $m[1];
+            $faccaoId   = strtolower($m[2]);
+
+            $dRepo    = new DistritoRepository();
+            $fRepo    = new FaccaoRepository();
+            $distrito = $dRepo->buscarPorId($distritoId);
+            $faccao   = $fRepo->buscarPorId($faccaoId);
+
+            if (!$distrito) { $message->reply("Distrito #{$distritoId} nao encontrado."); return; }
+            if (!$faccao)   { $message->reply("Faccao `{$faccaoId}` nao encontrada."); return; }
+
+            $dRepo->conquistar($distritoId, $faccaoId);
+            $message->reply("**[GM]** **{$faccao->nome}** agora domina **{$distrito->nome}** (#{$distritoId}).");
+            return;
+        }
+
+        // ── !liberar <distrito_id> ────────────────────────────────────────────
+        if (preg_match('/^!liberar\s+(\d+)$/i', $content, $m) && $authorId === '242459562655875073') {
+            $distritoId = (int) $m[1];
+
+            $dRepo    = new DistritoRepository();
+            $distrito = $dRepo->buscarPorId($distritoId);
+            if (!$distrito) { $message->reply("Distrito #{$distritoId} nao encontrado."); return; }
+
+            $anterior = $distrito->faccaoDominanteId ?? 'nenhum';
+            $dRepo->expulsarDominador($distritoId);
+            $message->reply("**[GM]** **{$distrito->nome}** (#{$distritoId}) liberado. Era dominado por: {$anterior}.");
+            return;
+        }
+
+        // ── !adm — Lista todos os comandos de admin ───────────────────────────
+        if (strtolower($content) === '!adm' && $authorId === '242459562655875073') {
+            $message->reply(
+                "**[PAINEL GM — Comandos Admin]**\n\n"
+              . "**Facções**\n"
+              . "`!set_faccao <id> <stat> <valor>` — altera stat de uma faccao\n"
+              . "  Stats: `fome`, `poder`, `suprimentos`, `sigilo`, `agressividade`, `postura`\n"
+              . "  IDs: kurogami, shinku_hana, mizu_no_rei, jishin, kiba_no_ikari, ccg\n"
+              . "  Ex: `!set_faccao kurogami fome 20`\n\n"
+              . "**Distritos**\n"
+              . "`!set_distrito <id> <stat> <valor>` — altera pilar de um distrito (1-23)\n"
+              . "  Stats: `seguranca`, `economia`, `suprimentos`, `alerta` (0-5), `dominacao`\n"
+              . "  Ex: `!set_distrito 14 seguranca 75`\n\n"
+              . "**Conquista / Liberação**\n"
+              . "`!dominar <distrito_id> <faccao_id>` — faz faccao dominar o distrito\n"
+              . "`!liberar <distrito_id>` — remove o dominador do distrito\n\n"
+              . "**Combate**\n"
+              . "`!combates_mesa` — lista confrontos aguardando GM\n"
+              . "`!resolver_mesa <id> <faccao_id>` — define vencedor do combate em mesa\n"
+              . "`!cancelar_mesa <id>` — cancela sem efeitos\n\n"
+              . "**Outros**\n"
+              . "`!despacho <texto>` — posta no Tokyo-GO\n"
+              . "`!dano <valor>` — registra dano colateral\n"
+              . "`!batalha_teste` — confronto de teste\n"
+              . "`!atividades_ghoul` — lista ops ghoul em andamento\n"
+              . "`!mover_teste <id>` — move CCG sem cooldown\n"
+            );
             return;
         }
 

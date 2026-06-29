@@ -86,19 +86,23 @@ class Faccao {
 	 * Não persiste sozinha — quem chama isso é responsável por salvar via Repository depois.
 	 */
 	public function passarOTempo(): void {
-		if ($this->id === 'ccg') return; // CCG não sofre a degradação do submundo
+		if ($this->id === 'ccg') return;
 
-		$aumentoFome = match (true) {
-			$this->suprimentos >= 70 => rand(1, 8),
-			$this->suprimentos >= 30 => rand(5, 15),
-			default => rand(10, 20),
-		};
+		// 3% de chance por tick (a cada 10min) — fome sobe ~10-20 por dia
+		// 0→100 em ~5-10 dias dependendo dos suprimentos (lore: ghoul aguenta ~1 semana)
+		if (rand(1, 100) <= 3) {
+			$aumento = match (true) {
+				$this->suprimentos >= 70 => rand(1, 2),
+				$this->suprimentos >= 30 => rand(2, 4),
+				default                  => rand(3, 6),
+			};
+			$this->fome = min(100, $this->fome + $aumento);
+		}
 
-		$this->fome = min(100, $this->fome + $aumentoFome);
-
-		if ($this->fome >= 80) {
-			$this->agressividade = min(100, $this->agressividade + 15);
-			$this->sigilo = max(0, $this->sigilo - 20);
+		// Fome crítica: instabilidade comportamental (1% por tick, não todo tick)
+		if ($this->fome >= 80 && rand(1, 100) <= 1) {
+			$this->agressividade = min(100, $this->agressividade + 3);
+			$this->sigilo        = max(0, $this->sigilo - 3);
 		}
 	}
 

@@ -122,7 +122,6 @@ class RotinasSobrevivencia {
     // ── Escolha de ação ───────────────────────────────────────────────────────
 
     private function escolherAcao(Faccao $faccao, array $limites): ?string {
-        // Remove tipos esgotados na semana
         $disponiveis = array_filter(
             $limites,
             fn($limite, $tipo) => $this->opGhoulRepo->contarSemana($faccao->id, $tipo) < $limite,
@@ -130,18 +129,42 @@ class RotinasSobrevivencia {
         );
         if (empty($disponiveis)) return null;
 
-        // Pesos por estado da facção
-        $pesos = [];
-        if (isset($disponiveis['alimentar']))
-            $pesos['alimentar']     = (int) ($faccao->fome * 0.5);
-        if (isset($disponiveis['cacar']))
-            $pesos['cacar']         = (int) ($faccao->fome * 1.5);
-        if (isset($disponiveis['contrabandear']))
-            $pesos['contrabandear'] = max(1, 100 - $faccao->suprimentos);
-        if (isset($disponiveis['recrutar']))
-            $pesos['recrutar']      = max(1, 100 - $faccao->poderMilitar);
+        $fome = $faccao->fome;
 
-        if (empty($pesos)) return null;
+        // Peso base mínimo para TODAS as atividades disponíveis — garante rotação
+        $pesos = [];
+        foreach (array_keys($disponiveis) as $tipo) {
+            $pesos[$tipo] = 15;
+        }
+
+        // Alimentar: prioridade principal quando fome alta — discreto e rápido (4h)
+        if (isset($pesos['alimentar'])) {
+            $pesos['alimentar'] += match (true) {
+                $fome >= 75 => 70, // Urgente
+                $fome >= 55 => 45,
+                $fome >= 35 => 20,
+                default     => 5,
+            };
+        }
+
+        // Caçar: impacto maior na fome mas levanta alerta — secundário à alimentação
+        if (isset($pesos['cacar'])) {
+            $pesos['cacar'] += match (true) {
+                $fome >= 65 => 35,
+                $fome >= 45 => 20,
+                default     => 5,
+            };
+        }
+
+        // Contrabandear: baseado em necessidade de suprimentos
+        if (isset($pesos['contrabandear'])) {
+            $pesos['contrabandear'] += (int) max(0, (80 - $faccao->suprimentos) * 0.5);
+        }
+
+        // Recrutar: baseado em fraqueza militar
+        if (isset($pesos['recrutar'])) {
+            $pesos['recrutar'] += (int) max(0, (70 - $faccao->poderMilitar) * 0.5);
+        }
 
         $total = array_sum($pesos);
         $roll  = rand(1, $total);

@@ -93,9 +93,6 @@ try {
 		if (!$d->faccaoDominanteId) continue;
 		if ($d->satisfacaoGeral >= 100 || $d->satisfacaoGeral < 20) {
 			$distritoRepo->expulsarDominador($d->id);
-			$questRepo = new QuestDistritoRepository();
-			$questRepo->resetarParaDistrito($d->id);
-			$questRepo->seedParaDistrito($d->id);
 			echo "  [REVOLTA] {$d->nome} (#{$d->id}) expulsou {$d->faccaoDominanteId} "
 			   . "(satisfacao: {$d->satisfacaoGeral}%)\n";
 		}
